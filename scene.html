@@ -1173,8 +1173,8 @@
         const jx = hash2i(gx, gy, 21);
         const jy = hash2i(gx, gy, 22);
         points.push({
-          x: (gx + 0.16 + jx * 0.68) * cell,
-          y: (gy + 0.16 + jy * 0.68) * cell
+          x: (gx + 0.08 + jx * 0.84) * cell,
+          y: (gy + 0.08 + jy * 0.84) * cell
         });
       }
     }
@@ -1203,7 +1203,7 @@
         }
 
         const edge = Math.sqrt(second) - Math.sqrt(nearest);
-        const line = 1 - smoothstep(0.0, 2.15, edge);
+        const line = 1 - smoothstep(0.0, 3.0, edge);
         const cellTone = ((gx * 7 + gy * 13) % 9) / 9;
 
         const u = x / size, v = y / size;
@@ -1214,9 +1214,9 @@
 
         // A very restrained ivory/cool-grey modulation, never brown.
         const warm = smoothstep(0.42, 0.8, broad * 0.7 + broad2 * 0.3);
-        let r = 0.955 + 0.035 * warm + 0.012 * cellTone;
-        let g = 0.949 + 0.034 * warm + 0.014 * cellTone;
-        let b = 0.930 + 0.028 * warm + 0.016 * cellTone;
+        let r = 0.955 + 0.035 * warm + 0.028 * cellTone;
+        let g = 0.949 + 0.034 * warm + 0.032 * cellTone;
+        let b = 0.930 + 0.028 * warm + 0.036 * cellTone;
         const cool = smoothstep(0.46, 0.78, broad2) * 0.035;
         r -= cool * 0.55;
         g -= cool * 0.15;
@@ -1225,12 +1225,12 @@
         // Fine crystal grain, plus the faint polygon seam.
         const speck = (grain > 0.996 ? 0.028 : 0) + (grain < 0.0025 ? -0.02 : 0);
         const grainMod = (grain2 - 0.5) * 0.027;
-        const lineMod = line * 0.05 + line * (grain - 0.5) * 0.012;
+        const lineMod = line * (0.06 * (0.55 + 0.45 * cellTone)) + line * (grain - 0.5) * 0.012;
         r = clamp(r + grainMod - lineMod + speck, 0, 1);
         g = clamp(g + grainMod - lineMod * 0.92 + speck, 0, 1);
         b = clamp(b + grainMod - lineMod * 0.82 + speck, 0, 1);
 
-        const height = clamp(0.55 + (broad - 0.5) * 0.24 + (grain2 - 0.5) * 0.1 - line * 0.16 + speck, 0, 1);
+        const height = clamp(0.55 + (broad - 0.5) * 0.24 + (grain2 - 0.5) * 0.1 - line * 0.34 + speck, 0, 1);
         heights[y * size + x] = height;
 
         data[p++] = r * 255;
@@ -1244,7 +1244,7 @@
     // ridges; the broad undulation stays almost flat so the mirror is not
     // disturbed. R = world X, G = world Z, B = up.
     const normalData = new Uint8Array(size * size * 4);
-    const slopeScale = 3.2;
+    const slopeScale = 5.2;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const hL = heights[y * size + (x - 1 + size) % size];
@@ -2178,12 +2178,19 @@
       float edge = (texture2D(uNoise, p * 0.081 + vec2(0.44, 0.09)).r - 0.5) * 0.03;
       wetField += edge;
 
-      float wet = smoothstep(0.19, 0.40, wetField);
-      float damp = smoothstep(0.14, 0.34, wetField);
-      float mirror = smoothstep(0.24, 0.46, wetField);
-      float farWet = smoothstep(120.0, 650.0, dist);
+      float wet = smoothstep(0.20, 0.31, wetField);
+      float damp = smoothstep(0.15, 0.28, wetField);
+      float mirror = smoothstep(0.26, 0.39, wetField);
+      float farWet = smoothstep(300.0, 1000.0, dist);
       wet = mix(wet, 1.0, farWet);
       mirror = mix(mirror, 1.0, farWet * 0.94);
+
+      // The view opens on the dry rim of a shallow sheet: dry crust behind,
+      // mirror water ahead. A world-space band keeps the transition stable.
+      float shoreBand = smoothstep(-45.0, 8.0, p.y);
+      wet *= mix(1.0, 0.12, shoreBand);
+      mirror *= mix(1.0, 0.10, shoreBand);
+      damp *= mix(1.0, 0.25, shoreBand);
 
       // ---------------------------------------------------------------
       // Salt crust — ivory and cool-grey mineral modulation, two scales of
@@ -2194,22 +2201,31 @@
       vec3 saltCol = mix(uSaltWarm, uSaltWhite, smoothstep(0.28, 0.74, macroWarm));
       saltCol = mix(saltCol, uSaltCool, smoothstep(0.44, 0.82, macroCool) * 0.34);
 
-      vec2 saltUvA = p * 0.090;
+      vec2 saltUvA = p * 0.055;
       vec2 saltUvB = rotate(p, 0.61) * 0.028 + vec2(0.37, 0.21);
       vec3 saltA = texture2D(uSalt, saltUvA).rgb;
       vec3 saltB = texture2D(uSalt, saltUvB).rgb;
-      float saltDetailFade = 1.0 - smoothstep(18.0, 240.0, dist);
-      vec3 saltTex = mix(saltB, saltA, mix(0.35, 0.8, saltDetailFade));
-      saltCol *= mix(vec3(0.945), saltTex * 1.12, mix(0.74, 0.97, saltDetailFade));
+      float saltDetailFade = 1.0 - smoothstep(40.0, 900.0, dist);
+      vec3 saltTex = mix(saltB, saltA, mix(0.5, 0.78, saltDetailFade));
+
+      // Broad mineral plates give the mid-ground its dry/wet patchwork.
+      float plates = texture2D(uNoise, p * 0.0042 + vec2(0.07, 0.31)).r;
+      float plateRange = smoothstep(12.0, 260.0, dist) * (1.0 - smoothstep(700.0, 1600.0, dist));
+      saltCol *= 1.0 + (plates - 0.5) * 0.16 * plateRange;
+
+      // Only part of the flat is crusty; elsewhere a smooth water film hides
+      // the polygons, which keeps the network from reading as a mesh.
+      float crustMask = smoothstep(0.30, 0.62, plates);
+      saltCol *= mix(vec3(0.97), saltTex * 1.08, mix(0.5, 1.0, saltDetailFade) * (0.58 + 0.42 * crustMask));
 
       // A faint blue-grey veil where water is thin, never brown or muddy.
-      vec3 wetSalt = mix(saltCol, saltCol * uWaterTint * 1.35 + uWaterTint * 0.02, 0.08 + damp * 0.22);
+      vec3 wetSalt = mix(saltCol, saltCol * uWaterTint * 1.35 + uWaterTint * 0.02, 0.06 + damp * 0.28);
       wetSalt *= mix(1.0, 0.935, wet);
 
-      // A slightly brighter, drier lip right at the waterline gives the
-      // shallow sheets a readable edge without drawing a hard outline.
+      // A brighter dry lip plus a darker damp band make the waterline read.
       float shore = smoothstep(0.255, 0.315, wetField) * (1.0 - smoothstep(0.315, 0.40, wetField));
-      wetSalt *= 1.0 + shore * 0.035;
+      float dampBand = smoothstep(0.31, 0.38, wetField) * (1.0 - smoothstep(0.38, 0.47, wetField));
+      wetSalt *= 1.0 + shore * 0.10 - dampBand * 0.07;
 
       // ---------------------------------------------------------------
       // Surface lighting. The flat surface uses the same sun/moon/hemi
@@ -2224,6 +2240,18 @@
       // Salt has a very high albedo, but the whole scene is displayed through
       // ACES: keep the crust near 1.0 in linear light so the mirror still reads.
       vec3 litSalt = wetSalt * (ambient + direct * 0.94) * 0.55;
+
+      // Rake the low sun/moon across the crust ridges. The normal map only
+      // lifts dry or damp salt; open water keeps its ripple normal.
+      vec3 saltN = texture2D(uSaltNormal, saltUvA).rgb * 2.0 - 1.0;
+      vec3 saltNB = texture2D(uSaltNormal, saltUvB).rgb * 2.0 - 1.0;
+      vec3 saltDir = normalize(vec3(saltN.x + saltNB.x * 0.6, 1.0, saltN.y + saltNB.y * 0.6));
+      vec3 lightDir = normalize(
+        uSunDir * max(uSunLightIntensity, 0.0) +
+        uMoonDir * max(uMoonLightIntensity, 0.0) + vec3(0.0, 0.0001, 0.0)
+      );
+      float rake = clamp(dot(saltDir, lightDir), 0.0, 1.0);
+      litSalt *= mix(1.0, 0.90 + 0.22 * rake, (1.0 - wet) * (1.0 - farWet));
 
       // Delicate caustic-like variation in the shallowest foreground.
       float nearWater = (1.0 - smoothstep(8.0, 105.0, dist)) * wet;
@@ -2279,6 +2307,9 @@
         uReflectionStrength * wet * (0.10 + 0.90 * fresnel) * (0.46 + 0.54 * mirror),
         0.0, 0.972
       );
+      // The water film is only a few centimetres deep near the viewer: let the
+      // crust read through it, and save the clean mirror for the distance.
+      mirrorWeight *= mix(0.85, 1.0, smoothstep(12.0, 110.0, dist));
 
       vec3 col = mix(litSalt, refl, mirrorWeight);
 
