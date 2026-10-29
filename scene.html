@@ -15,7 +15,7 @@
 
   CONTROLS
   --------
-  Drag to orbit · Scroll/pinch to zoom · Arrow keys (or WASD) to pan ·
+  Drag to orbit · Scroll/pinch to zoom · Arrow keys (or WASD) to move ·
   Double-click to reset. Time (日间/黄昏/夜晚) and weather
   (晴朗/疏云/阴天/小雨/暴雨) are independent: 3 × 5 = 15 combinations.
   Auto-orbit starts off; the top-right 上帝视角 button saves the current camera
@@ -657,7 +657,7 @@
     <span class="mouse" aria-hidden="true"></span>
     <span class="h">拖动环绕</span><span class="dot">·</span>
     <span class="h">滚轮缩放</span><span class="dot">·</span>
-    <span class="h">方向键平移</span><span class="dot">·</span>
+    <span class="h">方向键移动</span><span class="dot">·</span>
     <span class="fine h">双击复位</span>
   </div>
 
@@ -3001,7 +3001,7 @@
     if (app.autoOrbit) setAutoOrbit(false);
   });
 
-  /* ---------- 方向键平移 / 双击复位（v1） ---------- */
+  /* ---------- 方向键沿镜头视线移动 / 双击复位（v1） ---------- */
   const navKeys = Object.create(null);
   function isNavKey(k) {
     return k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight' ||
@@ -3022,13 +3022,15 @@
     if (!kf && !ks) return;
     const dist = camera.position.distanceTo(controls.target);
     const step = 34 * clamp(dist / 40, 0.6, 3.2) * dt;
-    const fwd = camera.getWorldDirection(new THREE.Vector3()); fwd.y = 0; fwd.normalize();
+    // 前后沿镜头视线（含俯仰）移动；左右平移保持水平
+    const fwd = camera.getWorldDirection(new THREE.Vector3()).normalize();
     const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
     const next = controls.target.clone()
       .addScaledVector(fwd, kf * step)
       .addScaledVector(right, ks * step);
     next.x = clamp(next.x, -320, 320);
     next.z = clamp(next.z, -360, 260);
+    next.y = clamp(next.y, 0.55, 260);
     const delta = next.clone().sub(controls.target);
     controls.target.copy(next);
     camera.position.add(delta);
@@ -3309,7 +3311,7 @@
     zh: {
       eyebrow: '玻利维亚 · 阿尔蒂普拉诺高原', title: '乌尤尼盐沼・天空之镜',
       subTitle: 'SALAR DE UYUNI', subEm: '海拔 3,656 米 · 一万平方公里的镜面',
-      hintArr: ['拖动环绕', '滚轮缩放', '方向键平移', '双击复位'],
+      hintArr: ['拖动环绕', '滚轮缩放', '方向键移动', '双击复位'],
       groups: ['视角','光','天'], views: ['全景','岛前','贴水','远眺'],
       times: ['日间','黄昏','夜晚'], weather: ['晴朗','疏云','阴天','小雨','暴雨'],
       orbit: '自动环绕', panelTitle: '天空之镜',
