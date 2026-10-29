@@ -1,0 +1,3563 @@
+<!DOCTYPE html>
+<!--
+  SALAR DE UYUNI — THE SKY MIRROR
+  A single-file, real-time Three.js landscape.
+
+  HOW TO OPEN
+  -----------
+  Best: serve this folder with a tiny static HTTP server, then open the URL.
+      cd <this folder>
+      python3 -m http.server 8000
+
+  It usually also works by double-clicking the file, but a local server is more
+  reliable for ES modules. Three.js and OrbitControls load from jsDelivr, so an
+  internet connection is required on first load (no build step, no assets).
+
+  CONTROLS
+  --------
+  Drag to orbit · Scroll/pinch to zoom · Arrow keys (or WASD) to pan ·
+  Double-click to reset. Time (日间/黄昏/夜晚) and weather
+  (晴朗/疏云/阴天/小雨/暴雨) are independent: 3 × 5 = 15 combinations.
+  Auto-orbit starts off; the top-right 上帝视角 button saves the current camera
+  and returns to it exactly. The bottom-left panel mirrors the Maldives
+  reference HUD: numbered preset groups, an auto-orbit switch, and a credit
+  line naming the model that generated the scene.
+  Test hooks live on window.__bw.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="license" content="CC BY-NC 4.0" />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<meta name="theme-color" content="#0b1118" />
+<!-- Scene © 2026 孙小画. Licensed CC BY-NC 4.0. Commercial use requires a separate license: https://x.com/huagechen -->
+<title>乌尤尼盐沼・天空之镜</title>
+<style>
+  :root {
+    --ink: #132029;
+    --ink-soft: #435762;
+    --white: #f9fbfa;
+    --glass: rgba(249, 251, 250, 0.58);
+    --glass-strong: rgba(249, 251, 250, 0.8);
+    --line: rgba(255, 255, 255, 0.62);
+    --line-dark: rgba(17, 31, 39, 0.12);
+    --selected: #14252e;
+    --serif: "Didot", "Bodoni 72", "Iowan Old Style", "Songti SC", "STSong", "Noto Serif CJK SC", "Times New Roman", serif;
+    --sans: "Avenir Next", "Futura", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+    --ease: cubic-bezier(.22,.61,.36,1);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #c9dbe2;
+    color: var(--white);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior: none;
+  }
+
+  body {
+    position: fixed;
+    inset: 0;
+    touch-action: none;
+  }
+
+  #scene {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    outline: none;
+    cursor: grab;
+    touch-action: none;
+  }
+  #scene:active { cursor: grabbing; }
+
+  /* Restrained cinematic vignette + top scrim for legibility. */
+  .vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background:
+      radial-gradient(ellipse at 50% 46%, rgba(4, 13, 18, 0) 46%, rgba(4, 13, 18, .12) 100%),
+      linear-gradient(180deg, rgba(7, 16, 23, .34) 0%, rgba(7, 16, 23, .12) 16%, rgba(7, 16, 23, 0) 32%);
+    mix-blend-mode: multiply;
+    opacity: .9;
+  }
+
+  /* ── masthead（版式照 maldives-atoll） ─────────────────── */
+  .masthead {
+    position: absolute;
+    z-index: 5;
+    top: clamp(22px, 4.2vh, 46px);
+    left: clamp(20px, 4.6vw, 64px);
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    pointer-events: none;
+    animation: rise 1.35s cubic-bezier(.16, 1, .3, 1) .25s both;
+  }
+  .mark { width: 44px; height: 44px; flex: none; margin-top: 3px; opacity: .9; }
+  .mark svg { width: 100%; height: 100%; display: block; }
+
+  .identity { max-width: 720px; }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px 2px;
+    color: #cfe8ef;
+    font-family: var(--sans);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: .33em;
+    text-transform: uppercase;
+    line-height: 1;
+    text-shadow: 0 2px 18px rgba(4, 16, 24, .5);
+  }
+  .eyebrow::after {
+    content: "";
+    display: block;
+    width: 38px;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(207, 232, 239, .55), transparent);
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(28px, 3.3vw, 46px);
+    line-height: 1.06;
+    letter-spacing: .135em;
+    color: #fff;
+    text-shadow: 0 2px 26px rgba(0, 18, 22, .34);
+  }
+
+  .subline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    font-family: var(--sans);
+    font-size: 9.5px;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .72);
+    text-shadow: 0 1px 14px rgba(4, 16, 24, .45);
+  }
+  .subline .thin { width: 22px; height: 1px; background: rgba(255, 255, 255, .38); flex: none; }
+  .subline .sub-title { letter-spacing: .26em; }
+  .subline em {
+    font-style: normal;
+    font-family: var(--serif);
+    font-size: 12.5px;
+    letter-spacing: .14em;
+    text-transform: none;
+    color: rgba(255, 255, 255, .82);
+  }
+
+  /* ── live status ──────────────────────────────────────── */
+  .status {
+    position: absolute;
+    z-index: 5;
+    top: clamp(24px, 4.4vh, 48px);
+    right: clamp(20px, 4.6vw, 64px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 13px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 100px;
+    background: rgba(10, 22, 30, .26);
+    -webkit-backdrop-filter: blur(16px) saturate(140%) brightness(.7);
+    backdrop-filter: blur(16px) saturate(140%) brightness(.7);
+    text-shadow: 0 1px 3px rgba(0, 12, 18, .45);
+    font-size: 9px;
+    letter-spacing: .21em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .62);
+    pointer-events: none;
+    animation: rise 1.35s cubic-bezier(.16, 1, .3, 1) .4s both;
+  }
+  .status .live-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #cfe8ef;
+    box-shadow: 0 0 10px rgba(207, 232, 239, .8);
+    transition: background .8s, box-shadow .8s;
+  }
+  .status .separator { width: 1px; height: 9px; background: rgba(255, 255, 255, .22); }
+  .status strong { color: rgba(255, 255, 255, .92); font-weight: 500; letter-spacing: .14em; }
+
+  /* ── control panel（尺寸/间距/按钮照 maldives-atoll） ──── */
+  .panel-wrap {
+    position: absolute;
+    z-index: 6;
+    left: clamp(20px, 4.6vw, 64px);
+    bottom: clamp(24px, 5vh, 52px);
+    width: 326px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .panel {
+    width: 100%;
+    padding: 20px 20px 15px;
+    background: rgba(10, 22, 30, .22);
+    border: 1px solid rgba(255, 255, 255, .24);
+    border-radius: 4px;
+    box-shadow:
+      0 18px 50px rgba(0, 12, 16, .18),
+      inset 0 1px 0 rgba(255, 255, 255, .1);
+    -webkit-backdrop-filter: blur(22px) saturate(125%) brightness(.68);
+    backdrop-filter: blur(22px) saturate(125%) brightness(.68);
+    text-shadow: 0 1px 2px rgba(0, 10, 16, .62);
+    color: #f4f7f8;
+    user-select: none;
+    animation: rise 1.4s cubic-bezier(.16, 1, .3, 1) .55s both;
+  }
+
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+  }
+  .panel-head .title {
+    font-family: var(--serif);
+    font-size: 14px;
+    letter-spacing: .2em;
+    color: #fff;
+  }
+  .panel-head .coord {
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    color: rgba(255, 255, 255, .55);
+    white-space: nowrap;
+  }
+
+  .group { display: flex; flex-direction: column; gap: 8px; }
+  .group-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 8.5px;
+    letter-spacing: .3em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .64);
+  }
+  .group-head .zh { font-family: var(--sans); letter-spacing: .24em; }
+  .group-head .idx {
+    font-family: var(--serif);
+    font-size: 10px;
+    letter-spacing: .08em;
+    color: rgba(207, 232, 239, .8);
+  }
+
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 1px; }
+  .seg.three { grid-template-columns: repeat(3, 1fr); }
+  .seg.five { grid-template-columns: repeat(5, 1fr); gap: 3px; }
+  .seg button {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    color: rgba(255, 255, 255, .88);
+    cursor: pointer;
+    padding: 9px 2px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+    font-family: var(--sans);
+    white-space: nowrap;
+    transition: background .35s, color .35s, border-color .35s, transform .18s;
+  }
+  .seg button .cn { font-size: 12px; letter-spacing: .12em; font-weight: 500; line-height: 1.1; }
+  .seg button .en { font-size: 7.5px; letter-spacing: .16em; opacity: .62; font-weight: 500; text-transform: uppercase; }
+  .seg.five button { padding: 9px 1px 8px; }
+  .seg.five button .cn { font-size: 11.5px; letter-spacing: .02em; }
+  .seg.five button .en { font-size: 6.5px; letter-spacing: .08em; }
+  html[lang="en"] .seg button .cn { display: none; }
+  html:not([lang="en"]) .seg button .en,
+  html:not([lang="en"]) .orbit-row .en { display: none; }
+  html[lang="en"] .seg button .en {
+    display: block;
+    font-size: 12px;
+    letter-spacing: .06em;
+    opacity: 1;
+    text-transform: none;
+  }
+  html[lang="en"] .seg.five button .en { font-size: 9.5px; letter-spacing: 0; }
+  .seg button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+  .seg button:active { transform: scale(.98); }
+  .seg button[aria-pressed="true"] {
+    background: rgba(252, 253, 253, .97);
+    border-color: #fff;
+    color: #0f2530;
+    box-shadow: 0 3px 12px rgba(0, 10, 16, .3);
+  }
+  .seg button[aria-pressed="true"] .en { opacity: .55; }
+  .seg button[aria-pressed="true"]:hover { background: #fff; }
+
+  .rule { height: 1px; background: rgba(255, 255, 255, .16); margin: 15px 0; }
+
+  .orbit-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    border: 0;
+    background: none;
+    color: rgba(255, 255, 255, .86);
+    cursor: pointer;
+    padding: 1px 0;
+    font-family: var(--sans);
+    text-align: left;
+  }
+  .orbit-row .zh { font-size: 11px; letter-spacing: .14em; transition: color .3s; }
+  .orbit-row:hover .zh { color: #fff; }
+  .switch {
+    width: 32px;
+    height: 17px;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, .28);
+    position: relative;
+    flex: none;
+    transition: background .35s, border-color .35s;
+  }
+  .switch span {
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    left: 2px;
+    top: 2px;
+    background: rgba(255, 255, 255, .6);
+    transition: transform .35s cubic-bezier(.16, 1, .3, 1), background .35s;
+  }
+  .orbit-row[aria-pressed="true"] .switch { background: rgba(207, 232, 239, .22); border-color: rgba(207, 232, 239, .6); }
+  .orbit-row[aria-pressed="true"] .switch span { transform: translateX(15px); background: #cfe8ef; }
+
+  /* 署名放在面板下方，面板本身与马尔代夫同尺寸 */
+  .credit {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-self: flex-start;
+    padding: 7px 11px 6px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 4px;
+    background: rgba(10, 22, 30, .18);
+    -webkit-backdrop-filter: blur(16px) saturate(125%) brightness(.70);
+    backdrop-filter: blur(16px) saturate(125%) brightness(.70);
+    text-shadow: 0 1px 3px rgba(0, 12, 18, .45);
+  }
+  .credit .model {
+    font-size: 9.5px;
+    letter-spacing: .1em;
+    color: rgba(207, 232, 239, 1);
+  }
+  .credit .lic {
+    font-size: 8px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .58);
+  }
+
+  /* ── hint ─────────────────────────────────────────────── */
+  .hint {
+    position: absolute;
+    z-index: 5;
+    right: clamp(20px, 4.6vw, 64px);
+    bottom: clamp(26px, 5.2vh, 54px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 100px;
+    background: rgba(10, 22, 30, .26);
+    -webkit-backdrop-filter: blur(16px) saturate(140%) brightness(.7);
+    backdrop-filter: blur(16px) saturate(140%) brightness(.7);
+    text-shadow: 0 1px 3px rgba(0, 12, 18, .45);
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .6);
+    transition: opacity 1.2s var(--ease);
+    pointer-events: none;
+    animation: rise 1.5s cubic-bezier(.16, 1, .3, 1) .8s both;
+  }
+  .hint.is-hidden { opacity: 0; }
+  .hint .mouse {
+    width: 13px;
+    height: 19px;
+    border: 1px solid rgba(255, 255, 255, .38);
+    border-radius: 8px;
+    position: relative;
+    flex: none;
+  }
+  .hint .mouse::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 3px;
+    width: 1px;
+    height: 4px;
+    background: rgba(255, 255, 255, .55);
+    animation: scroll 2.4s ease-in-out infinite;
+  }
+  .hint .dot { opacity: .35; }
+  .hint .fine {
+    font-family: var(--serif);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: none;
+    color: rgba(255, 255, 255, .52);
+  }
+  @keyframes scroll {
+    0%, 100% { transform: translateY(0); opacity: .25; }
+    45% { transform: translateY(4px); opacity: .8; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Loading veil */
+  #loading {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    background:
+      radial-gradient(ellipse at 50% 66%, #e8eef0 0%, #cfdee3 40%, #91aab4 100%);
+    transition: opacity 1.25s var(--ease), visibility 1.25s;
+  }
+  #loading.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .load-mark {
+    color: #334b55;
+    text-align: center;
+  }
+  .load-mark .line1 {
+    font-family: var(--serif);
+    font-size: clamp(18px, 2.2vw, 28px);
+    letter-spacing: .16em;
+  }
+  .load-mark .line2 {
+    margin-top: 12px;
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: .42em;
+    color: rgba(33, 58, 68, .56);
+    text-transform: uppercase;
+  }
+  .load-bar {
+    width: 92px;
+    height: 1px;
+    background: rgba(33, 58, 68, .18);
+    overflow: hidden;
+    position: relative;
+  }
+  .load-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #335260;
+    transform-origin: left center;
+    animation: loadSweep 1.7s var(--ease) infinite;
+  }
+  @keyframes loadSweep {
+    0% { transform: translateX(-100%) scaleX(.4); }
+    60%, 100% { transform: translateX(100%) scaleX(.8); }
+  }
+
+  /* Fallback / error */
+  #error {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    place-items: center;
+    background: #dfe8ea;
+    color: #22343c;
+    text-align: center;
+    padding: 28px;
+  }
+  #error.is-visible { display: grid; }
+  #error .box { max-width: 520px; }
+  #error h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0 0 14px; letter-spacing: .04em; }
+  #error p { font-size: 12px; line-height: 1.8; color: #51636b; margin: 0 0 8px; }
+  #error code { font-size: 11px; background: rgba(255,255,255,.5); padding: 2px 5px; border-radius: 4px; }
+
+  :focus-visible {
+    outline: 1px solid rgba(255, 255, 255, .9);
+    outline-offset: 2px;
+  }
+  .seg button:focus-visible, .orbit-row:focus-visible {
+    outline: 1px solid rgba(240, 226, 194, .8);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 960px) {
+    .masthead { top: max(56px, calc(env(safe-area-inset-top) + 46px)); left: 18px; }
+    .eyebrow { margin-bottom: 9px; font-size: 8px; letter-spacing: .26em; }
+    .eyebrow::before { width: 18px; }
+    h1 { font-size: clamp(20px, 5.8vw, 26px); letter-spacing: .1em; }
+    .subline { display: none; }
+    .mark { width: 34px; height: 34px; margin-top: 2px; }
+    .status {
+      top: max(18px, env(safe-area-inset-top));
+      right: 18px;
+      padding: 8px 10px;
+      font-size: 8px;
+      gap: 7px;
+    }
+    .status .separator, .status .weather-tag { display: none; }
+    .panel-wrap {
+      left: 12px;
+      right: 12px;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      width: auto;
+    }
+    .panel { padding: 15px 15px 11px; }
+    .panel-head { margin-bottom: 12px; }
+    .panel-head .title { font-size: 12px; }
+    .panel-head .coord { display: none; }
+    .group { gap: 6px; }
+    .seg button { padding: 8px 1px 7px; }
+    .seg button .cn { font-size: 11px; letter-spacing: .02em; }
+    .rule { margin: 11px 0; }
+    .hint { display: none; }
+  }
+
+  @media (max-height: 560px) and (orientation: landscape) {
+    .masthead { top: 16px; }
+    .status { display: none; }
+    .panel-wrap { width: 300px; bottom: 14px; }
+    .panel { padding: 13px 15px 9px; }
+    .panel-head { display: none; }
+    .rule { margin: 8px 0; }
+    .hint { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .load-bar::after { animation-duration: 4s; }
+    #loading { transition-duration: .2s; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="scene" aria-label="乌尤尼盐沼的交互式 3D 景观，可切换时刻与天气"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 44 44" fill="none">
+        <circle cx="22" cy="22" r="17.5" stroke="#d9edf4" stroke-opacity=".7" stroke-width=".7"/>
+        <circle cx="22" cy="22" r="12" stroke="#ffffff" stroke-opacity=".35" stroke-width=".6" stroke-dasharray="1.5 2.6"/>
+        <path d="M8.5 22.2h27" stroke="#ffffff" stroke-opacity=".85" stroke-width=".8" stroke-linecap="round"/>
+        <circle cx="22" cy="16.4" r="1.15" fill="#ffffff"/>
+        <path d="M16.2 27.6c2.1 1.5 3.9 1.5 5.8 0s3.7-1.5 5.8 0" stroke="#ffffff" stroke-opacity=".55" stroke-width=".7" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="identity">
+      <p class="eyebrow">玻利维亚 · 阿尔蒂普拉诺高原</p>
+      <h1>乌尤尼盐沼・天空之镜</h1>
+      <div class="subline">
+        <span class="thin"></span>
+        <span class="sub-title" id="sub-title">SALAR DE UYUNI</span>
+        <span class="thin"></span>
+        <em id="sub-em">海拔 3,656 米 · 一万平方公里的镜面</em>
+      </div>
+    </div>
+  </header>
+
+  <div class="status" aria-live="polite">
+    <span class="live-dot" aria-hidden="true"></span>
+    <strong id="status-time">日间</strong>
+    <span class="separator" aria-hidden="true"></span>
+    <span class="weather-tag" id="status-weather">晴朗</span>
+  </div>
+
+  <div class="panel-wrap">
+    <aside class="panel" role="group" aria-label="场景预设">
+      <div class="panel-head">
+        <span class="title" id="panel-title">天空之镜</span>
+        <span class="coord"><span id="coord-a">南纬 20° 08′</span> · <span id="coord-b">西经 67° 29′</span></span>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="viewLabel">
+        <div class="group-head"><span id="viewLabel"><span class="zh">视角</span></span><span class="idx">01</span></div>
+        <div class="seg" id="view-options" role="group" aria-label="机位预设">
+          <button type="button" data-view="opening" aria-pressed="true"><span class="cn">全景</span><span class="en">Overview</span></button>
+          <button type="button" data-view="island" aria-pressed="false"><span class="cn">岛前</span><span class="en">Island</span></button>
+          <button type="button" data-view="mirror" aria-pressed="false"><span class="cn">贴水</span><span class="en">Waterline</span></button>
+          <button type="button" data-view="vista" aria-pressed="false"><span class="cn">远眺</span><span class="en">Vista</span></button>
+        </div>
+      </div>
+
+      <div class="rule"></div>
+
+      <div class="group" role="group" aria-labelledby="timeLabel">
+        <div class="group-head"><span id="timeLabel"><span class="zh">光</span></span><span class="idx">02</span></div>
+        <div class="seg three" id="time-options" role="group" aria-label="时刻">
+          <button type="button" data-time="day" aria-pressed="true"><span class="cn">日间</span><span class="en">Day</span></button>
+          <button type="button" data-time="sunset" aria-pressed="false"><span class="cn">黄昏</span><span class="en">Sunset</span></button>
+          <button type="button" data-time="night" aria-pressed="false"><span class="cn">夜晚</span><span class="en">Night</span></button>
+        </div>
+      </div>
+
+      <div class="rule"></div>
+
+      <div class="group" role="group" aria-labelledby="weatherLabel">
+        <div class="group-head"><span id="weatherLabel"><span class="zh">天</span></span><span class="idx">03</span></div>
+        <div class="seg five" id="weather-options" role="group" aria-label="天气">
+          <button type="button" data-weather="clear" aria-pressed="true"><span class="cn">晴朗</span><span class="en">Clear</span></button>
+          <button type="button" data-weather="scattered" aria-pressed="false"><span class="cn">疏云</span><span class="en">Drift</span></button>
+          <button type="button" data-weather="overcast" aria-pressed="false"><span class="cn">阴天</span><span class="en">Overcast</span></button>
+          <button type="button" data-weather="lightrain" aria-pressed="false"><span class="cn">小雨</span><span class="en">Drizzle</span></button>
+          <button type="button" data-weather="storm" aria-pressed="false"><span class="cn">暴雨</span><span class="en">Storm</span></button>
+        </div>
+      </div>
+
+      <div class="rule"></div>
+
+      <button type="button" class="orbit-row" id="orbit-toggle" aria-pressed="false" aria-label="切换自动环绕" title="自动环绕">
+        <span class="label"><span class="zh">自动环绕</span></span>
+        <span class="switch" aria-hidden="true"><span></span></span>
+      </button>
+    </aside>
+
+    <div class="credit">
+      <span class="model" id="credit-model">由 DeepSeek V4.1 Flash 生成</span>
+      <span class="lic" id="credit-lic">孙小画 · CC BY-NC 4.0</span>
+    </div>
+  </div>
+
+  <div class="hint" id="hint">
+    <span class="mouse" aria-hidden="true"></span>
+    <span class="h">拖动环绕</span><span class="dot">·</span>
+    <span class="h">滚轮缩放</span><span class="dot">·</span>
+    <span class="h">方向键平移</span><span class="dot">·</span>
+    <span class="fine h">双击复位</span>
+  </div>
+
+  <div id="loading">
+    <div class="load-mark">
+      <div class="line1">天空之镜</div>
+      <div class="line2">正在抵达镜面</div>
+    </div>
+    <div class="load-bar"></div>
+  </div>
+
+  <div id="error" role="alert">
+    <div class="box">
+      <h2>正在等待天空</h2>
+      <p id="error-message">本场景需要支持 WebGL 2 的浏览器，并需要联网加载 Three.js。</p>
+      <p id="error-server">若以本地文件方式打开，请先用静态服务器启动此目录：</p>
+      <p><code>python3 -m http.server 8000</code></p>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  /* =========================================================================
+     0. CONSTANTS + SMALL UTILITIES
+     ========================================================================= */
+
+  const IS_COARSE = window.matchMedia('(pointer: coarse)').matches;
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const MAX_DPR = Math.min(window.devicePixelRatio || 1, IS_COARSE ? 1.5 : 1.75);
+  const MOBILE = IS_COARSE || Math.min(window.innerWidth, window.innerHeight) < 680;
+
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const damp = (a, b, lambda, dt) => lerp(a, b, 1 - Math.exp(-lambda * dt));
+  const DEG = Math.PI / 180;
+
+  function directionFromAngles(azimuthDeg, elevationDeg) {
+    const az = azimuthDeg * DEG;
+    const el = elevationDeg * DEG;
+    return new THREE.Vector3(
+      Math.sin(az) * Math.cos(el),
+      Math.sin(el),
+      -Math.cos(az) * Math.cos(el)
+    ).normalize();
+  }
+
+  function paint(hex) { return new THREE.Color(hex); }
+
+  // A deterministic 2D hash used by CPU-side texture generation.
+  function hash2i(x, y, seed) {
+    let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (seed | 0) * 1442695041;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = h ^ (h >>> 16);
+    return (h >>> 0) / 4294967295;
+  }
+
+  function smoothstep(a, b, x) {
+    const t = clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
+  function tileableNoise(x, y, period, seed) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf);
+    const v = yf * yf * (3 - 2 * yf);
+    const x0 = ((xi % period) + period) % period;
+    const y0 = ((yi % period) + period) % period;
+    const x1 = (x0 + 1) % period;
+    const y1 = (y0 + 1) % period;
+    const a = hash2i(x0, y0, seed);
+    const b = hash2i(x1, y0, seed);
+    const c = hash2i(x0, y1, seed);
+    const d = hash2i(x1, y1, seed);
+    return lerp(lerp(a, b, u), lerp(c, d, u), v);
+  }
+
+  function fbmcpu(x, y, period, octaves, seed, gain = 0.5) {
+    let sum = 0, amp = 1, norm = 0, p = period;
+    for (let i = 0; i < octaves; i++) {
+      // x/y arrive in 0..1 texture space: scale by the lattice period so the
+      // pattern repeats exactly at the texture border.
+      sum += amp * tileableNoise(x * p, y * p, p, seed + i * 131);
+      norm += amp;
+      amp *= gain;
+      p *= 2;
+    }
+    return sum / norm;
+  }
+
+  /* =========================================================================
+     1. ART DIRECTION — TIME / WEATHER PRESETS
+     All values are interpolated at runtime. Geometry is never rebuilt.
+     ========================================================================= */
+
+  const TIME_PRESETS = {
+    day: {
+      skyZenith: '#083d68', skyMid: '#2270a8', skyHorizon: '#a2cddf',
+      hazeColor: '#bcd9e6', hazeSunColor: '#eef0e6',
+      sunColor: '#fff5e3', sunGlowColor: '#ffe4bd', moonColor: '#dce9ff',
+      cloudLit: '#fffdf8', cloudShadow: '#8fa6b8', cloudWarm: '#ffe9cd',
+      sunLightColor: '#fff4e4', moonLightColor: '#9fbcf4',
+      hemiSky: '#b8d9eb', hemiGround: '#f0e8d9', ambientColor: '#adc9d8',
+      fogColor: '#c3dfe9', mountainLow: '#374b5c', mountainHigh: '#5d7486',
+      saltWhite: '#fbf8f0', saltWarm: '#f2e6d0', saltCool: '#dfe8ea',
+      waterTint: '#dcebed', glintColor: '#fff7e7',
+      sunAz: 23, sunEl: 55, moonAz: -31, moonEl: 24,
+      sunDiskIntensity: 3.4, sunGlowIntensity: 0.75,
+      moonDiskIntensity: 0, moonGlowIntensity: 0,
+      sunLightIntensity: 2.45, moonLightIntensity: 0,
+      hemiIntensity: 1.1, ambientIntensity: 0.1,
+      exposure: 0.92, fogDensity: 0.000036,
+      cloudCover: 0.40, cloudOpacity: 0.84, cirrusOpacity: 0.22, overcastness: 0,
+      reflectionStrength: 1.22, reflectionBlur: 0.0003,
+      glintStrength: 0.92, hazeAmount: 0.13, chop: 1,
+      starVisibility: 0, milkyVisibility: 0, mountainHaze: 0.13
+    },
+    sunset: {
+      skyZenith: '#454a80', skyMid: '#a9678c', skyHorizon: '#ffb066',
+      hazeColor: '#ffc08a', hazeSunColor: '#ff8a45',
+      sunColor: '#ff8a3d', sunGlowColor: '#ff7f3f', moonColor: '#d9e6ff',
+      cloudLit: '#ffcfa8', cloudShadow: '#7a6a88', cloudWarm: '#ff8e52',
+      sunLightColor: '#ffb277', moonLightColor: '#91b0e8',
+      hemiSky: '#a18da9', hemiGround: '#ddb79c', ambientColor: '#a78e97',
+      fogColor: '#e8bca2', mountainLow: '#5a5a85', mountainHigh: '#8b7fa0',
+      saltWhite: '#f8eee2', saltWarm: '#f2d4b8', saltCool: '#d8dbe6',
+      waterTint: '#efd8c9', glintColor: '#ffcf98',
+      sunAz: 14, sunEl: 2.7, moonAz: 18, moonEl: 20,
+      sunDiskIntensity: 1.0, sunGlowIntensity: 2.0,
+      moonDiskIntensity: 0, moonGlowIntensity: 0,
+      sunLightIntensity: 1.5, moonLightIntensity: 0,
+      hemiIntensity: 0.78, ambientIntensity: 0.08,
+      exposure: 1.0, fogDensity: 0.00006,
+      cloudCover: 0.4, cloudOpacity: 0.72, cirrusOpacity: 0.20, overcastness: 0,
+      reflectionStrength: 1.08, reflectionBlur: 0.00045,
+      glintStrength: 0.72, hazeAmount: 0.92, chop: 1,
+      starVisibility: 0, milkyVisibility: 0, mountainHaze: 0.46
+    },
+    night: {
+      skyZenith: '#030711', skyMid: '#0a1526', skyHorizon: '#1b3147',
+      hazeColor: '#203b50', hazeSunColor: '#355366',
+      sunColor: '#ffd0a0', sunGlowColor: '#e58c58', moonColor: '#e7efff',
+      cloudLit: '#43566b', cloudShadow: '#07101b', cloudWarm: '#7d90a6',
+      sunLightColor: '#ffc699', moonLightColor: '#92b6ff',
+      hemiSky: '#1b2e4c', hemiGround: '#35495e', ambientColor: '#1e2d40',
+      fogColor: '#15283a', mountainLow: '#0b1928', mountainHigh: '#1b3044',
+      saltWhite: '#eef1f2', saltWarm: '#dfe2e3', saltCool: '#c1d2df',
+      waterTint: '#172a3d', glintColor: '#c9dcff',
+      sunAz: 14, sunEl: -7, moonAz: 18, moonEl: 20,
+      sunDiskIntensity: 0, sunGlowIntensity: 0,
+      moonDiskIntensity: 1.4, moonGlowIntensity: 0.35,
+      sunLightIntensity: 0, moonLightIntensity: 0.38,
+      hemiIntensity: 0.46, ambientIntensity: 0.09,
+      exposure: 1.06, fogDensity: 0.000033,
+      cloudCover: 0.3, cloudOpacity: 0.35, cirrusOpacity: 0.12, overcastness: 0,
+      reflectionStrength: 1.02, reflectionBlur: 0.00055,
+      glintStrength: 0.025, hazeAmount: 0.62, chop: 1,
+      starVisibility: 1.0, milkyVisibility: 0.58, mountainHaze: 0.42
+    }
+  };
+
+  const WEATHER_PRESETS = {
+    clear: {
+      cloudCover: 0.28, cloudOpacity: 0.82, cirrusOpacity: 0.14, overcastness: 0,
+      sunFactor: 1, moonFactor: 1, ambientFactor: 1,
+      reflection: 1, reflectionBlur: 0.0002, fog: 0.86,
+      glint: 1.15, star: 1, milky: 1, exposure: 1, chop: 1
+    },
+    scattered: {
+      cloudCover: 0.55, cloudOpacity: 0.95, cirrusOpacity: 0.34, overcastness: 0.1,
+      sunFactor: 0.9, moonFactor: 0.86, ambientFactor: 1.04,
+      reflection: 0.94, reflectionBlur: 0.0007, fog: 1.04,
+      glint: 0.85, star: 0.5, milky: 0.45, exposure: 1, chop: 1.18
+    },
+    overcast: {
+      cloudCover: 0.97, cloudOpacity: 0.96, cirrusOpacity: 0.05, overcastness: 1,
+      sunFactor: 0.2, moonFactor: 0.42, ambientFactor: 1.38,
+      reflection: 0.72, reflectionBlur: 0.0015, fog: 1.4,
+      glint: 0.12, star: 0.012, milky: 0.015, exposure: 1.01, chop: 1.7
+    },
+    lightrain: {
+      cloudCover: 0.99, cloudOpacity: 0.98, cirrusOpacity: 0.04, overcastness: 1,
+      sunFactor: 0.12, moonFactor: 0.28, ambientFactor: 1.45,
+      reflection: 0.58, reflectionBlur: 0.002, fog: 1.75,
+      glint: 0.06, star: 0.005, milky: 0.005, exposure: 0.97, chop: 2.6
+    },
+    storm: {
+      cloudCover: 1.0, cloudOpacity: 1.0, cirrusOpacity: 0.02, overcastness: 1,
+      sunFactor: 0.05, moonFactor: 0.12, ambientFactor: 1.62,
+      reflection: 0.38, reflectionBlur: 0.0025, fog: 2.15,
+      glint: 0.02, star: 0, milky: 0, exposure: 0.9, chop: 4.8
+    }
+  };
+
+  const OVERCAST_GRADE = {
+    day: {
+      skyZenith: '#788b98', skyMid: '#9dafb8', skyHorizon: '#dce6e8',
+      hazeColor: '#e1e9ea', hazeSunColor: '#e9e2d8',
+      cloudLit: '#f0f3f3', cloudShadow: '#6f818e', cloudWarm: '#e8e1d9',
+      fogColor: '#dde7e9', mountainLow: '#8f9ca5', mountainHigh: '#b2bec6',
+      waterTint: '#e0e9ea', saltWhite: '#f8f7f1', saltWarm: '#f1ebe0', saltCool: '#e0e8ea',
+      sunGlowColor: '#f4e9db'
+    },
+    sunset: {
+      skyZenith: '#615f76', skyMid: '#94858e', skyHorizon: '#d7b4a8',
+      hazeColor: '#dcc2b8', hazeSunColor: '#e4b4a0',
+      cloudLit: '#efded8', cloudShadow: '#6f6472', cloudWarm: '#daa99a',
+      fogColor: '#d8beb4', mountainLow: '#77718c', mountainHigh: '#9d97a9',
+      waterTint: '#e3d4ce', saltWhite: '#f5ece4', saltWarm: '#ebd6c5', saltCool: '#d8d6dc',
+      sunGlowColor: '#e8b48f'
+    },
+    night: {
+      skyZenith: '#09111c', skyMid: '#172534', skyHorizon: '#2d4052',
+      hazeColor: '#354b5e', hazeSunColor: '#455c6e',
+      cloudLit: '#4a5a6e', cloudShadow: '#0a111c', cloudWarm: '#82919f',
+      fogColor: '#1c2b39', mountainLow: '#101e2b', mountainHigh: '#243849',
+      waterTint: '#1b2c3b', saltWhite: '#e4e9ed', saltWarm: '#d8dcdf', saltCool: '#b8c8d5',
+      sunGlowColor: '#26384b'
+    }
+  };
+
+  // 小雨 / 暴雨不能只是"同一张阴天调暗"。二者从阴天 grade 派生各自的色偏：
+  // 小雨偏冷灰（水汽），暴雨偏墨蓝（积雨云底），再叠加不同的雾、风与水面色。
+  function deriveGrade(grade, tint, amount) {
+    const out = {};
+    for (const key of Object.keys(grade)) out[key] = paint(grade[key]).lerp(paint(tint), amount);
+    return out;
+  }
+  const RAIN_GRADE = {};
+  const STORM_GRADE = {};
+  for (const timeId of Object.keys(OVERCAST_GRADE)) {
+    RAIN_GRADE[timeId] = deriveGrade(OVERCAST_GRADE[timeId], '#6d8496', 0.22);
+    STORM_GRADE[timeId] = deriveGrade(OVERCAST_GRADE[timeId], '#1b2836', 0.5);
+  }
+
+  // Build a complete, interpolatable state object for a time + weather pair.
+  function buildPreset(timeId, weatherId) {
+    const t = TIME_PRESETS[timeId];
+    const w = WEATHER_PRESETS[weatherId];
+
+    const state = {
+      colors: {},
+      numbers: {},
+      vectors: {
+        sunDir: directionFromAngles(t.sunAz, t.sunEl),
+        moonDir: directionFromAngles(t.moonAz, t.moonEl)
+      }
+    };
+
+    const colorKeys = [
+      'skyZenith', 'skyMid', 'skyHorizon', 'hazeColor', 'hazeSunColor',
+      'sunColor', 'sunGlowColor', 'moonColor', 'cloudLit', 'cloudShadow', 'cloudWarm',
+      'sunLightColor', 'moonLightColor', 'hemiSky', 'hemiGround', 'ambientColor',
+      'fogColor', 'mountainLow', 'mountainHigh', 'saltWhite', 'saltWarm', 'saltCool',
+      'waterTint', 'glintColor'
+    ];
+
+    for (const key of colorKeys) state.colors[key] = paint(t[key]);
+
+    const numberKeys = [
+      'sunDiskIntensity', 'sunGlowIntensity', 'moonDiskIntensity', 'moonGlowIntensity',
+      'sunLightIntensity', 'moonLightIntensity', 'hemiIntensity', 'ambientIntensity',
+      'exposure', 'fogDensity', 'cloudCover', 'cloudOpacity', 'cirrusOpacity', 'overcastness',
+      'reflectionStrength', 'reflectionBlur', 'glintStrength', 'hazeAmount',
+      'starVisibility', 'milkyVisibility', 'mountainHaze', 'chop'
+    ];
+    for (const key of numberKeys) state.numbers[key] = t[key];
+
+    // Compose the weather layer. Cloud opacity is a time-of-day property
+    // (moonlit clouds are much fainter than midday clouds), while weather
+    // scales that base rather than replacing it.
+    state.numbers.cloudCover = clamp(w.cloudCover + (timeId === 'sunset' ? 0.07 : 0), 0, 1);
+    let cloudOpacity = t.cloudOpacity * (w.cloudOpacity / 0.82);
+    if (weatherId === 'overcast' || weatherId === 'lightrain' || weatherId === 'storm') cloudOpacity = Math.max(cloudOpacity, 0.86);
+    state.numbers.cloudOpacity = Math.min(1, cloudOpacity);
+    state.numbers.cirrusOpacity = Math.min(0.8, t.cirrusOpacity * (w.cirrusOpacity / 0.22));
+    state.numbers.overcastness = w.overcastness;
+    state.numbers.sunDiskIntensity *= w.sunFactor;
+    state.numbers.sunGlowIntensity *= lerp(0.55, 1, w.sunFactor);
+    state.numbers.moonDiskIntensity *= w.moonFactor;
+    state.numbers.moonGlowIntensity *= w.moonFactor;
+    state.numbers.sunLightIntensity *= w.sunFactor;
+    state.numbers.moonLightIntensity *= w.moonFactor;
+    state.numbers.hemiIntensity *= w.ambientFactor;
+    state.numbers.ambientIntensity *= w.ambientFactor;
+    state.numbers.reflectionStrength *= w.reflection;
+    state.numbers.reflectionBlur = Math.max(t.reflectionBlur, w.reflectionBlur);
+    state.numbers.fogDensity *= w.fog;
+    state.numbers.glintStrength *= w.glint;
+    state.numbers.starVisibility *= w.star;
+    state.numbers.milkyVisibility *= w.milky;
+    state.numbers.exposure *= w.exposure;
+    state.numbers.hazeAmount *= lerp(0.9, 1.45, w.overcastness);
+    // 风的强度：只放大水面斜率，不改几何。晴天几乎无风，暴雨把镜面吹碎。
+    state.numbers.chop *= w.chop;
+
+    if (weatherId === 'overcast' || weatherId === 'lightrain' || weatherId === 'storm') {
+      const grade = weatherId === 'storm'
+        ? STORM_GRADE[timeId]
+        : weatherId === 'lightrain'
+          ? RAIN_GRADE[timeId]
+          : OVERCAST_GRADE[timeId];
+      const mix = weatherId === 'storm'
+        ? (timeId === 'night' ? 0.88 : 0.84)
+        : weatherId === 'lightrain'
+          ? (timeId === 'night' ? 0.78 : 0.72)
+          : (timeId === 'night' ? 0.72 : 0.66);
+      for (const key of Object.keys(grade)) {
+        state.colors[key].lerp(paint(grade[key]), mix);
+      }
+      state.colors.sunGlowColor.lerp(paint(grade.sunGlowColor), 0.65);
+      state.colors.saltWhite.lerp(paint(grade.saltWhite), 0.38);
+      state.colors.saltWarm.lerp(paint(grade.saltWarm), 0.35);
+      state.colors.saltCool.lerp(paint(grade.saltCool), 0.3);
+    } else if (weatherId === 'scattered') {
+      const grade = OVERCAST_GRADE[timeId];
+      const mix = timeId === 'night' ? 0.1 : 0.08;
+      state.colors.skyHorizon.lerp(paint(grade.skyHorizon), mix);
+      state.colors.cloudLit.lerp(paint(grade.cloudLit), 0.12);
+    }
+
+    return state;
+  }
+
+  function initialiseLiveState(target) {
+    const live = { colors: {}, numbers: {}, vectors: {} };
+    for (const k in target.colors) live.colors[k] = target.colors[k].clone();
+    for (const k in target.numbers) live.numbers[k] = target.numbers[k];
+    for (const k in target.vectors) live.vectors[k] = target.vectors[k].clone();
+    return live;
+  }
+
+  function dampPreset(live, target, dt, speed = 1.45) {
+    const a = 1 - Math.exp(-speed * dt);
+    for (const k in target.colors) live.colors[k].lerp(target.colors[k], a);
+    for (const k in target.numbers) live.numbers[k] = lerp(live.numbers[k], target.numbers[k], a);
+    for (const k in target.vectors) {
+      live.vectors[k].lerp(target.vectors[k], a);
+      if (live.vectors[k].lengthSq() > 0.0001) live.vectors[k].normalize();
+    }
+  }
+
+  const app = {
+    time: 'day',
+    weather: 'clear',
+    target: null,
+    live: null,
+    autoOrbit: false,
+    userInteracted: false,
+    ready: false
+  };
+  app.target = buildPreset(app.time, app.weather);
+  app.live = initialiseLiveState(app.target);
+
+  /* =========================================================================
+     2. RENDERER, CAMERA, LIGHTS
+     ========================================================================= */
+
+  const canvas = document.getElementById('scene');
+  const loadingEl = document.getElementById('loading');
+  const errorEl = document.getElementById('error');
+  const errorMessageEl = document.getElementById('error-message');
+
+  function showFatalError(message) {
+    loadingEl.classList.add('is-hidden');
+    if (message) errorMessageEl.textContent = message;
+    errorEl.classList.add('is-visible');
+  }
+
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: !MOBILE,
+      alpha: false,
+      stencil: false,
+      powerPreference: 'high-performance'
+    });
+  } catch (err) {
+    showFatalError('WebGL could not start. Please enable hardware acceleration or try another browser.');
+    throw err;
+  }
+
+  renderer.setPixelRatio(MAX_DPR);
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = false;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0xdfeef2, 0.00005);
+
+  const camera = new THREE.PerspectiveCamera(
+    52,
+    window.innerWidth / window.innerHeight,
+    0.4,
+    220000
+  );
+
+  const OPENING = {
+    position: new THREE.Vector3(0, 2.85, 11.5),
+    target: new THREE.Vector3(0, 2.30, -54)
+  };
+  const VIEW_PRESETS = {
+    opening: { position: OPENING.position.clone(), target: OPENING.target.clone() },
+    island: { position: new THREE.Vector3(-31, 4.6, -102), target: new THREE.Vector3(-43, 3.4, -150) },
+    mirror: { position: new THREE.Vector3(7, 1.28, -16), target: new THREE.Vector3(3, 1.05, -165) },
+    vista: { position: new THREE.Vector3(34, 26, 62), target: new THREE.Vector3(4, 2.0, -260) }
+  };
+  camera.position.copy(OPENING.position);
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.target.copy(OPENING.target);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.055;
+  controls.enablePan = false;
+  controls.rotateSpeed = 0.36;
+  controls.zoomSpeed = 0.7;
+  controls.minDistance = 17;
+  controls.maxDistance = 340;
+  controls.minPolarAngle = 0.46;
+  controls.maxPolarAngle = 1.551;
+  controls.autoRotate = app.autoOrbit;
+  controls.autoRotateSpeed = 0.07;
+  controls.update();
+
+  const hemiLight = new THREE.HemisphereLight(0xb8d9eb, 0xf0e8d9, 1.1);
+  scene.add(hemiLight);
+
+  const ambientLight = new THREE.AmbientLight(0xadc9d8, 0.1);
+  scene.add(ambientLight);
+
+  const sunLight = new THREE.DirectionalLight(0xfff4e4, 2.45);
+  sunLight.position.copy(directionFromAngles(23, 55)).multiplyScalar(8000);
+  scene.add(sunLight);
+  scene.add(sunLight.target);
+
+  const moonLight = new THREE.DirectionalLight(0x9fbcf4, 0);
+  moonLight.position.copy(directionFromAngles(-31, 24)).multiplyScalar(8000);
+  scene.add(moonLight);
+  scene.add(moonLight.target);
+
+  /* =========================================================================
+     3. PROCEDURAL TEXTURES  (generated once, shared by every preset)
+     ========================================================================= */
+
+  const maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const GALACTIC_POLE = new THREE.Vector3(0.58, 0.46, 0.24).normalize();
+
+  /**
+   * Tileable multi-channel FBM used by the sky (cloud shapes) and the salt.
+   * R = large billows, G = broken mid-frequencies, B = fine detail, A = wisps.
+   */
+  function makeCloudNoiseTexture(size = 512) {
+    const data = new Uint8Array(size * size * 4);
+    let p = 0;
+    for (let y = 0; y < size; y++) {
+      const v = y / size;
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const wx = fbmcpu(u, v, 3, 2, 103);
+        const wy = fbmcpu(u, v, 3, 2, 211);
+        const pu = u + (wx - 0.5) * 0.42;
+        const pv = v + (wy - 0.5) * 0.42;
+
+        const base = fbmcpu(pu, pv, 3, 4, 17, 0.52);
+        const mid = fbmcpu(pu + 0.173, pv + 0.311, 6, 3, 43, 0.5);
+        const detail = fbmcpu(pu, pv, 12, 3, 79, 0.52);
+        const ridge = 1 - Math.abs(fbmcpu(pu - 0.23, pv + 0.11, 5, 3, 131, 0.5) * 2 - 1);
+
+        data[p++] = clamp(base, 0, 1) * 255;
+        data[p++] = clamp(mid, 0, 1) * 255;
+        data[p++] = clamp(detail, 0, 1) * 255;
+        data[p++] = clamp(ridge, 0, 1) * 255;
+      }
+    }
+    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.name = 'cloud-noise';
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = maxAnisotropy;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  /**
+   * Salt crust: barely-there ivory/grey variation plus a faint, irregular
+   * jittered-grid polygon network and crystalline grain. The alpha channel
+   * carries a small height field; a matching tangent-space normal map is
+   * derived from it so low sun can rake across the polygonal ridges.
+   */
+  function makeSaltTexture(size = 512) {
+    const data = new Uint8Array(size * size * 4);
+    const heights = new Float32Array(size * size);
+    const cells = 7;
+    const cell = size / cells;
+    const points = [];
+    for (let gy = 0; gy < cells; gy++) {
+      for (let gx = 0; gx < cells; gx++) {
+        const jx = hash2i(gx, gy, 21);
+        const jy = hash2i(gx, gy, 22);
+        points.push({
+          x: (gx + 0.16 + jx * 0.68) * cell,
+          y: (gy + 0.16 + jy * 0.68) * cell
+        });
+      }
+    }
+    const at = (gx, gy) => points[((gy + cells) % cells) * cells + ((gx + cells) % cells)];
+
+    let p = 0;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const gx = Math.floor(x / cell);
+        const gy = Math.floor(y / cell);
+        let nearest = 1e9;
+        let second = 1e9;
+
+        // Toroidal distance to the 3x3 surrounding cell seeds.
+        for (let oy = -1; oy <= 1; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            const q = at(gx + ox, gy + oy);
+            let dx = Math.abs(x - q.x);
+            let dy = Math.abs(y - q.y);
+            dx = Math.min(dx, size - dx);
+            dy = Math.min(dy, size - dy);
+            const d = dx * dx + dy * dy;
+            if (d < nearest) { second = nearest; nearest = d; }
+            else if (d < second) { second = d; }
+          }
+        }
+
+        const edge = Math.sqrt(second) - Math.sqrt(nearest);
+        const line = 1 - smoothstep(0.0, 2.15, edge);
+        const cellTone = ((gx * 7 + gy * 13) % 9) / 9;
+
+        const u = x / size, v = y / size;
+        const broad = fbmcpu(u, v, 4, 3, 501, 0.55);
+        const broad2 = fbmcpu(u + 0.27, v + 0.13, 6, 2, 733, 0.55);
+        const grain = hash2i(x, y, 907);
+        const grain2 = hash2i(x >> 1, y >> 1, 413);
+
+        // A very restrained ivory/cool-grey modulation, never brown.
+        const warm = smoothstep(0.42, 0.8, broad * 0.7 + broad2 * 0.3);
+        let r = 0.955 + 0.035 * warm + 0.012 * cellTone;
+        let g = 0.949 + 0.034 * warm + 0.014 * cellTone;
+        let b = 0.930 + 0.028 * warm + 0.016 * cellTone;
+        const cool = smoothstep(0.46, 0.78, broad2) * 0.035;
+        r -= cool * 0.55;
+        g -= cool * 0.15;
+        b += cool * 0.45;
+
+        // Fine crystal grain, plus the faint polygon seam.
+        const speck = (grain > 0.996 ? 0.028 : 0) + (grain < 0.0025 ? -0.02 : 0);
+        const grainMod = (grain2 - 0.5) * 0.027;
+        const lineMod = line * 0.05 + line * (grain - 0.5) * 0.012;
+        r = clamp(r + grainMod - lineMod + speck, 0, 1);
+        g = clamp(g + grainMod - lineMod * 0.92 + speck, 0, 1);
+        b = clamp(b + grainMod - lineMod * 0.82 + speck, 0, 1);
+
+        const height = clamp(0.55 + (broad - 0.5) * 0.24 + (grain2 - 0.5) * 0.1 - line * 0.16 + speck, 0, 1);
+        heights[y * size + x] = height;
+
+        data[p++] = r * 255;
+        data[p++] = g * 255;
+        data[p++] = b * 255;
+        data[p++] = height * 255;
+      }
+    }
+
+    // Convert the height field into a gentle normal map. Seams become tiny
+    // ridges; the broad undulation stays almost flat so the mirror is not
+    // disturbed. R = world X, G = world Z, B = up.
+    const normalData = new Uint8Array(size * size * 4);
+    const slopeScale = 3.2;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const hL = heights[y * size + (x - 1 + size) % size];
+        const hR = heights[y * size + (x + 1) % size];
+        const hD = heights[((y - 1 + size) % size) * size + x];
+        const hU = heights[((y + 1) % size) * size + x];
+        let nx = (hL - hR) * slopeScale;
+        let nz = (hD - hU) * slopeScale;
+        const inv = 1 / Math.sqrt(nx * nx + nz * nz + 1);
+        nx *= inv;
+        nz *= inv;
+        const ny = inv;
+        const i = (y * size + x) * 4;
+        normalData[i] = (nx * 0.5 + 0.5) * 255;
+        normalData[i + 1] = (nz * 0.5 + 0.5) * 255;
+        normalData[i + 2] = (ny * 0.5 + 0.5) * 255;
+        normalData[i + 3] = 255;
+      }
+    }
+
+    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.name = 'salt-crust';
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = maxAnisotropy;
+    texture.needsUpdate = true;
+
+    const normalTexture = new THREE.DataTexture(normalData, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    normalTexture.name = 'salt-crust-normal';
+    normalTexture.wrapS = normalTexture.wrapT = THREE.RepeatWrapping;
+    normalTexture.colorSpace = THREE.NoColorSpace;
+    normalTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    normalTexture.magFilter = THREE.LinearFilter;
+    normalTexture.generateMipmaps = true;
+    normalTexture.anisotropy = maxAnisotropy;
+    normalTexture.needsUpdate = true;
+
+    return { color: texture, normal: normalTexture };
+  }
+
+  /**
+   * A gentle, tileable normal field for the water. We keep the slopes tiny;
+   * the shader adds long, slow swell waves on top.
+   */
+  function makeRippleTexture(size = 256) {
+    const data = new Uint8Array(size * size * 4);
+    const TAU = Math.PI * 2;
+
+    function heightAt(u, v) {
+      const a = Math.sin(TAU * (3 * u + 2 * v) + 0.8) * 0.30;
+      const b = Math.sin(TAU * (-2 * u + 5 * v) + 2.1) * 0.16;
+      const c = Math.sin(TAU * (6 * u - 4 * v) + 4.2) * 0.08;
+      const d = (fbmcpu(u, v, 4, 3, 881, 0.55) - 0.5) * 0.65;
+      return a + b + c + d;
+    }
+
+    for (let y = 0; y < size; y++) {
+      const v = y / size;
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const du = 1 / size;
+        const dx = (heightAt(u + du, v) - heightAt(u - du, v)) * 0.5;
+        const dy = (heightAt(u, v + du) - heightAt(u, v - du)) * 0.5;
+        const nx = -dx * 9.0;
+        const ny = -dy * 9.0;
+        const len = Math.sqrt(nx * nx + ny * ny + 1);
+        const i = (y * size + x) * 4;
+        data[i] = (nx / len * 0.5 + 0.5) * 255;
+        data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+        data[i + 2] = heightAt(u, v) * 0.5 * 255 + 128;
+        data[i + 3] = 255;
+      }
+    }
+
+    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.name = 'water-ripples';
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = Math.min(4, maxAnisotropy);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  /**
+   * Equirectangular star field. Slightly denser around the Milky Way plane,
+   * with restrained sizes and colours so it remains photographic.
+   */
+  function makeStarTexture(w = 4096, h = 2048) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+
+    const count = IS_COARSE ? 1450 : 2050;
+    for (let i = 0; i < count; i++) {
+      const lon = (hash2i(i, 1, 9001) - 0.5) * Math.PI * 2;
+      const lat = Math.asin(hash2i(i, 2, 9001) * 2 - 1);
+      const dir = new THREE.Vector3(
+        Math.cos(lat) * Math.cos(lon),
+        Math.sin(lat),
+        Math.cos(lat) * Math.sin(lon)
+      );
+      const nearBand = Math.abs(dir.dot(GALACTIC_POLE)) < 0.16;
+
+      // A few extra faint stars live in the galactic band.
+      const q = hash2i(i, 3, 9001);
+      if (nearBand && q < 0.72) continue;
+
+      const u = Math.atan2(dir.z, dir.x) / (Math.PI * 2) + 0.5;
+      const v = Math.asin(clamp(dir.y, -1, 1)) / Math.PI + 0.5;
+      const x = u * w;
+      const y = (1 - v) * h;
+
+      const bright = Math.pow(hash2i(i, 4, 9001), 3.2);
+      const isBand = nearBand ? 1 : 0;
+      const sizePx = 0.20 + bright * 0.52 + isBand * 0.05;
+      const hue = hash2i(i, 5, 9001);
+      let color;
+      if (hue < 0.12) color = [255, 222, 190];
+      else if (hue < 0.32) color = [202, 222, 255];
+      else color = [240, 246, 255];
+      const alpha = 0.12 + bright * 0.58;
+
+      if (bright > 0.82) {
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, sizePx * 2.2);
+        glow.addColorStop(0, `rgba(${color[0]},${color[1]},${color[2]},${alpha * 0.14})`);
+        glow.addColorStop(0.35, `rgba(${color[0]},${color[1]},${color[2]},${alpha * 0.045})`);
+        glow.addColorStop(1, `rgba(${color[0]},${color[1]},${color[2]},0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, sizePx * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(0.28, sizePx), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const texture = new THREE.CanvasTexture(c);
+    texture.name = 'stars';
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.anisotropy = 2;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  const cloudNoiseTexture = makeCloudNoiseTexture();
+  const saltTextures = makeSaltTexture();
+  const saltTexture = saltTextures.color;
+  const saltNormalTexture = saltTextures.normal;
+  const rippleTexture = makeRippleTexture();
+  const starTexture = makeStarTexture(IS_COARSE ? 2048 : 4096, IS_COARSE ? 1024 : 2048);
+
+  /* =========================================================================
+     4. SKY DOME  (gradient, sun, moon, clouds, stars, Milky Way)
+     ========================================================================= */
+
+  const skyVertex = /* glsl */`
+    varying vec2 vNdc;
+    void main() {
+      vNdc = position.xy;
+      gl_Position = vec4(position.xy, 0.99999, 1.0);
+    }
+  `;
+
+  const skyFragment = /* glsl */`
+    precision highp float;
+
+    uniform sampler2D uNoise;
+    uniform sampler2D uStars;
+    uniform vec3 uZenith;
+    uniform vec3 uMid;
+    uniform vec3 uHorizon;
+    uniform vec3 uHaze;
+    uniform vec3 uHazeSun;
+    uniform vec3 uSunColor;
+    uniform vec3 uSunGlow;
+    uniform vec3 uMoonColor;
+    uniform vec3 uCloudLit;
+    uniform vec3 uCloudShadow;
+    uniform vec3 uCloudWarm;
+    uniform vec3 uSunDir;
+    uniform vec3 uMoonDir;
+    uniform vec3 uGalacticPole;
+    uniform mat4 uInvProjection;
+    uniform mat4 uCameraWorld;
+    uniform float uSunDisk;
+    uniform float uSunGlowIntensity;
+    uniform float uMoonDisk;
+    uniform float uMoonGlowIntensity;
+    uniform float uCloudCover;
+    uniform float uCloudOpacity;
+    uniform float uCirrusOpacity;
+    uniform float uOvercastness;
+    uniform float uTime;
+    uniform float uStarVisibility;
+    uniform float uMilkyVisibility;
+    uniform float uHazeAmount;
+
+    varying vec2 vNdc;
+
+    #define PI 3.14159265359
+    #define TAU 6.28318530718
+
+    float hash12(vec2 p) {
+      vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+      p3 += dot(p3, p3.yzx + 33.33);
+      return fract((p3.x + p3.y) * p3.z);
+    }
+
+    vec2 equirect(vec3 d) {
+      return vec2(
+        atan(d.z, d.x) / TAU + 0.5,
+        asin(clamp(d.y, -1.0, 1.0)) / PI + 0.5
+      );
+    }
+
+    vec2 cloudDome(vec3 d) {
+      vec2 p = d.xz / (max(d.y, 0.0) + 0.34);
+      p.x *= 0.78;
+      return p;
+    }
+
+    // Soft, slow-moving cloud mass. A gentle domain warp keeps the silhouettes
+    // organic without turning them into oil-paint swirls; the extra octaves
+    // give the edges a broken, wind-torn quality.
+    float cloudField(vec2 p) {
+      float w1 = texture2D(uNoise, p * 0.12 + vec2(0.13, 0.57)).g;
+      float w2 = texture2D(uNoise, p * 0.11 + vec2(0.71, 0.22)).b;
+      vec2 q = p + (vec2(w1, w2) - 0.5) * 0.18;
+      float a = texture2D(uNoise, q * 0.46 + vec2(0.02, 0.09)).r;
+      float b = texture2D(uNoise, q * 0.95 + vec2(0.27, 0.61)).g;
+      float c = texture2D(uNoise, q * 2.10 + vec2(0.49, 0.33)).b;
+      float d = texture2D(uNoise, q * 4.00 + vec2(0.17, 0.83)).a;
+      float density = a * 0.62 + b * 0.29 + c * 0.07 + d * 0.02;
+      return density;
+    }
+
+    void main() {
+      vec4 eye = uInvProjection * vec4(vNdc, -1.0, 1.0);
+      vec3 dirView = normalize(eye.xyz / eye.w);
+      vec3 dir = normalize(mat3(uCameraWorld) * dirView);
+      float y = dir.y;
+      float yUp = max(y, 0.0);
+
+      // --- Three-stop sky gradient -----------------------------------------
+      vec3 sky = mix(uHorizon, uMid, smoothstep(-0.015, 0.30, yUp));
+      sky = mix(sky, uZenith, smoothstep(0.22, 0.88, yUp));
+
+      // Soft, broad scattering around the sun.
+      float sunMu = max(dot(dir, uSunDir), 0.0);
+      float sunNear = pow(sunMu, 8.0);
+      float sunWide = pow(sunMu, 2.2);
+      sky += uSunGlow * (sunNear * 0.14 + sunWide * 0.035) * uSunGlowIntensity;
+
+      // Sun disk. Slightly broadened by the atmosphere but still compact.
+      float diskEdge = smoothstep(0.99982, 0.999955, sunMu);
+      sky += uSunColor * diskEdge * uSunDisk * (0.5 + 0.5 * smoothstep(0.0, 0.03, y));
+
+      // Moon and its quiet halo at night.
+      float moonMu = max(dot(dir, uMoonDir), 0.0);
+      float moonHalo = pow(moonMu, 260.0) * 0.16 + pow(moonMu, 16.0) * 0.022;
+      sky += uMoonColor * moonHalo * uMoonGlowIntensity;
+      float moonEdge = smoothstep(0.99980, 0.99994, moonMu);
+      float mare = texture2D(uNoise, equirect(dir) * vec2(3.1, 1.7) + 0.2).r;
+      sky += uMoonColor * moonEdge * uMoonDisk * (0.82 + mare * 0.18);
+
+      // --- Milky Way --------------------------------------------------------
+      // The band is a soft great-circle glow, broken by the same noise field.
+      float poleDist = dot(dir, uGalacticPole);
+      float band = exp(-pow(poleDist / 0.115, 2.0));
+      float broadBand = exp(-pow(poleDist / 0.26, 2.0)) * 0.34;
+      vec2 muv = equirect(dir);
+      float dustA = texture2D(uNoise, muv * vec2(5.7, 2.7) + 0.11).r;
+      float dustB = texture2D(uNoise, muv * vec2(11.3, 5.2) + 0.63).g;
+      float galacticNoise = smoothstep(0.22, 0.88, dustA * 0.7 + dustB * 0.3);
+      float dustLane = smoothstep(0.43, 0.68, dustB);
+      float mwMask = (band * 0.7 + broadBand) * (0.45 + 0.75 * galacticNoise);
+      mwMask *= 1.0 - dustLane * 0.42;
+      vec3 mwColor = mix(vec3(0.24, 0.31, 0.48), vec3(0.52, 0.43, 0.36), galacticNoise * 0.46);
+      float mwHorizon = smoothstep(-0.015, 0.14, yUp);
+      vec3 mwLayer = mwColor * mwMask * uMilkyVisibility * mwHorizon * 0.5;
+
+      // --- Stars ------------------------------------------------------------
+      vec2 starUv = equirect(dir);
+      vec3 stars = texture2D(uStars, starUv).rgb;
+      float starHorizon = smoothstep(-0.005, 0.105, yUp);
+      vec3 starLayer = stars * uStarVisibility * starHorizon * 1.35;
+
+      // --- Clouds -----------------------------------------------------------
+      float wind = uTime;
+      vec2 dome = cloudDome(dir);
+      vec2 p = dome * 1.08 + vec2(wind * 0.0021, wind * 0.00072);
+
+      float field = cloudField(p);
+      float coverMod = texture2D(uNoise, p * 0.23 + vec2(0.41, 0.73)).g;
+      // Map the 0..1 cover dial to a density threshold. The field is centred
+      // near 0.5, so small threshold moves give large, controllable changes.
+      float threshold = 0.5 + (0.5 - uCloudCover) * 0.46 + (coverMod - 0.5) * 0.05;
+      float softness = mix(0.09, 0.28, uOvercastness);
+      float cumulus = smoothstep(threshold, threshold + softness, field);
+      float edge = smoothstep(threshold, threshold + 0.06, field);
+      float core = smoothstep(threshold + 0.05, threshold + 0.30, field);
+
+      // Sample the same cloud field a little toward the sun: where the density
+      // falls away in that direction we are on the sun-facing flank.
+      vec2 sunXZ = normalize(uSunDir.xz + vec2(0.0001, 0.0002));
+      float litField = cloudField(p + sunXZ * 0.055);
+      float litSide = smoothstep(-0.04, 0.10, field - litField);
+
+      // Dense cores are the sunlit tops; thin edges and the underside toward
+      // the horizon fall into the blue-grey shadow.
+      float innerLight = clamp(0.50 + core * 0.38 + litSide * 0.26 + edge * 0.05, 0.0, 1.0);
+
+      // In a full overcast deck the threshold is saturated, so shade from the
+      // field itself: broad layers of lighter and darker cloud, not one sheet.
+      float overcastTone = 0.12 + 0.78 * smoothstep(0.16, 0.84, field);
+      float layer = texture2D(uNoise, p * 0.075 + vec2(0.61, 0.17)).r;
+      overcastTone *= 0.78 + 0.32 * layer;
+      float cloudTone = mix(innerLight, overcastTone, uOvercastness);
+
+      vec3 cloudCol = mix(uCloudShadow, uCloudLit, cloudTone);
+      cloudCol = mix(cloudCol, uCloudLit, litSide * 0.18 * (1.0 - uOvercastness));
+
+      // Clouds near the horizon are seen from below, so their bases sit in
+      // deeper shadow than the high tops.
+      float cloudLift = smoothstep(0.015, 0.22, yUp);
+      cloudCol = mix(uCloudShadow * 1.02, cloudCol, 0.55 + 0.45 * cloudLift);
+
+      // Warm/rim light from the low sun; at night a cool moonlit edge.
+      float towardSun = pow(max(dot(dir, uSunDir), 0.0), 6.0);
+      cloudCol += uCloudWarm * towardSun * 0.22 * uSunGlowIntensity * (1.0 - core * 0.45);
+      float towardMoon = pow(max(dot(dir, uMoonDir), 0.0), 7.0);
+      cloudCol += uMoonColor * towardMoon * uMoonGlowIntensity * 0.13 * (1.0 - core * 0.5);
+
+      // High, delicate cirrus layer. More visible in clear weather.
+      vec2 cirrusP = dome * vec2(0.31, 0.56) + vec2(wind * 0.0013, wind * 0.00038);
+      float cirrusA = texture2D(uNoise, cirrusP * 0.72 + 0.13).a;
+      float cirrusB = texture2D(uNoise, cirrusP * 2.05 + 0.57).a;
+      float cirrus = smoothstep(0.80, 0.965, cirrusA * 0.65 + cirrusB * 0.35);
+      vec3 cirrusCol = mix(uCloudShadow, uCloudLit, 0.72 + cirrus * 0.25);
+      cirrusCol += uCloudWarm * towardSun * 0.25 * uSunGlowIntensity;
+
+      float horizonCloudFade = smoothstep(0.006, 0.075, yUp) * 0.82 + 0.18;
+      float cloudA = clamp(cumulus * uCloudOpacity * horizonCloudFade, 0.0, 0.98);
+      float cirrusA2 = clamp(cirrus * uCirrusOpacity * horizonCloudFade, 0.0, 0.72);
+      float occlusion = 1.0 - (1.0 - cloudA) * (1.0 - cirrusA2);
+
+      sky = mix(sky, cloudCol, cloudA);
+      sky = mix(sky, cirrusCol, cirrusA2);
+
+      // Celestial light is added after the cloud pass so it is veiled by the
+      // cloud opacity (instead of floating in front of it).
+      sky += (starLayer + mwLayer) * (1.0 - occlusion);
+
+      // --- Horizon atmosphere ------------------------------------------------
+      float horizon = pow(1.0 - clamp(y, 0.0, 1.0), 7.0);
+      vec3 horizDir = normalize(vec3(dir.x, 0.0, dir.z) + vec3(0.0001, 0.0, 0.0));
+      vec3 sunHoriz = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0001, 0.0, 0.0));
+      float towardSunAz = pow(max(dot(horizDir, sunHoriz), 0.0), 5.0);
+      vec3 hazeCol = mix(uHaze, uHazeSun, towardSunAz * 0.75);
+      hazeCol += uSunGlow * pow(max(dot(dir, uSunDir), 0.0), 3.0) * uSunGlowIntensity * 0.12;
+      sky = mix(sky, hazeCol, clamp(horizon * uHazeAmount * 0.8, 0.0, 0.92));
+
+      // A gentle atmospheric lift below the mathematical horizon keeps the
+      // mirrored sky and the salt-flat horizon perfectly continuous.
+      sky = mix(sky, uHaze * 0.88, smoothstep(0.0, -0.09, y) * 0.45);
+
+      // 8-bit dithering to prevent gradient banding.
+      sky += (hash12(gl_FragCoord.xy + fract(uTime) * 31.7) - 0.5) * 0.0016;
+
+      gl_FragColor = vec4(max(sky, vec3(0.0)), 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `;
+
+  const skyMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uNoise: { value: cloudNoiseTexture },
+      uStars: { value: starTexture },
+      uZenith: { value: new THREE.Color() },
+      uMid: { value: new THREE.Color() },
+      uHorizon: { value: new THREE.Color() },
+      uHaze: { value: new THREE.Color() },
+      uHazeSun: { value: new THREE.Color() },
+      uSunColor: { value: new THREE.Color() },
+      uSunGlow: { value: new THREE.Color() },
+      uMoonColor: { value: new THREE.Color() },
+      uCloudLit: { value: new THREE.Color() },
+      uCloudShadow: { value: new THREE.Color() },
+      uCloudWarm: { value: new THREE.Color() },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+      uGalacticPole: { value: GALACTIC_POLE.clone() },
+      uInvProjection: { value: new THREE.Matrix4() },
+      uCameraWorld: { value: new THREE.Matrix4() },
+      uSunDisk: { value: 0 },
+      uSunGlowIntensity: { value: 0 },
+      uMoonDisk: { value: 0 },
+      uMoonGlowIntensity: { value: 0 },
+      uCloudCover: { value: 0.3 },
+      uCloudOpacity: { value: 0.6 },
+      uCirrusOpacity: { value: 0.4 },
+      uOvercastness: { value: 0 },
+      uTime: { value: 0 },
+      uStarVisibility: { value: 0 },
+      uMilkyVisibility: { value: 0 },
+      uHazeAmount: { value: 0.7 }
+    },
+    vertexShader: skyVertex,
+    fragmentShader: skyFragment,
+    side: THREE.FrontSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false
+  });
+
+  // A single full-screen triangle. The view ray is reconstructed per pixel,
+  // so the sky never shows sphere tessellation, even across a low sun.
+  const skyGeometry = new THREE.BufferGeometry();
+  skyGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -1, -1, 0,
+     3, -1, 0,
+    -1,  3, 0
+  ], 3));
+  const skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+  skyMesh.frustumCulled = false;
+  skyMesh.renderOrder = -1000;
+  scene.add(skyMesh);
+
+  /* =========================================================================
+     5. DISTANT ANDES — TWO LOW-POLY SILHOUETTE RINGS
+     ========================================================================= */
+
+  const mountainVertex = /* glsl */`
+    varying vec3 vWorld;
+    void main() {
+      vec4 world = modelMatrix * vec4(position, 1.0);
+      vWorld = world.xyz;
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `;
+
+  const mountainFragment = /* glsl */`
+    precision highp float;
+    uniform vec3 uBase;
+    uniform vec3 uPeak;
+    uniform vec3 uHaze;
+    uniform vec3 uSunDir;
+    uniform vec3 uRimColor;
+    uniform float uHeight;
+    uniform float uHazeMix;
+    uniform float uRimStrength;
+    varying vec3 vWorld;
+
+    void main() {
+      float h = clamp(vWorld.y / max(uHeight, 1.0), 0.0, 1.0);
+      vec3 col = mix(uBase, uPeak, smoothstep(0.02, 0.9, h));
+      float haze = mix(uHazeMix * 0.92, uHazeMix * 0.22, smoothstep(0.0, 0.65, h));
+      col = mix(col, uHaze, haze);
+
+      // A whisper of warm light on the sunward flanks, no specular or detail.
+      vec2 xz = normalize(vWorld.xz + vec2(0.0001, 0.0001));
+      vec2 sunXZ = normalize(uSunDir.xz + vec2(0.0001, 0.0001));
+      float sunFacing = max(dot(xz, sunXZ), 0.0);
+      col += uRimColor * pow(sunFacing, 11.0) * uRimStrength * (0.35 + 0.65 * (1.0 - h));
+
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `;
+
+  function makeMountainRing(radius, maxHeight, seed, segments, frequencyBias) {
+    const positions = [];
+    const indices = [];
+    const phase = [seed * 1.71, seed * 2.23, seed * 3.11, seed * 4.37, seed * 5.19];
+
+    for (let i = 0; i < segments; i++) {
+      const a = i / segments * Math.PI * 2;
+      // Integer frequencies close the ring seamlessly.
+      let ridge =
+        0.34 +
+        0.26 * Math.sin(a * 2 + phase[0]) +
+        0.17 * Math.sin(a * 5 + phase[1]) +
+        0.11 * Math.sin(a * 9 + phase[2]) +
+        0.07 * Math.sin(a * 17 + phase[3]) +
+        0.05 * Math.sin(a * 31 + phase[4]);
+      ridge += 0.12 * Math.pow(Math.abs(Math.sin(a * 3.0 + phase[1] * 0.7)), 6.0);
+      ridge = Math.pow(clamp(ridge, 0, 1), 1.15);
+      ridge *= 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(a * frequencyBias + phase[2]));
+
+      const height = 0.16 * maxHeight + ridge * 0.84 * maxHeight;
+      const x = Math.cos(a) * radius;
+      const z = Math.sin(a) * radius;
+      positions.push(x, -90, z);
+      positions.push(x, height, z);
+    }
+
+    for (let i = 0; i < segments; i++) {
+      const j = (i + 1) % segments;
+      const b0 = i * 2;
+      const t0 = b0 + 1;
+      const b1 = j * 2;
+      const t1 = b1 + 1;
+      indices.push(b0, b1, t0, b1, t1, t0);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    return geo;
+  }
+
+  const mountainMaterials = [];
+  function addMountainRing(radius, height, seed, segments, farLayer, hazeMix) {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uBase: { value: new THREE.Color(0x8798a3) },
+        uPeak: { value: new THREE.Color(0xaebdc5) },
+        uHaze: { value: new THREE.Color(0xdfeef2) },
+        uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+        uRimColor: { value: new THREE.Color(0xffd8ac) },
+        uHeight: { value: height },
+        uHazeMix: { value: hazeMix },
+        uRimStrength: { value: farLayer ? 0.15 : 0.26 }
+      },
+      vertexShader: mountainVertex,
+      fragmentShader: mountainFragment,
+      side: THREE.DoubleSide,
+      fog: false
+    });
+    mat.userData.far = farLayer;
+    mat.userData.hazeMix = hazeMix;
+    mountainMaterials.push(mat);
+    const mesh = new THREE.Mesh(makeMountainRing(radius, height, seed, segments, farLayer ? 1.7 : 1.3), mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    scene.add(mesh);
+  }
+
+  addMountainRing(16500, 1180, 4.2, 320, false, 0.27);
+  addMountainRing(31000, 2150, 7.7, 260, true, 0.44);
+
+  /* =========================================================================
+     6. TWO SALT ISLANDS WITH GIANT CACTI
+     ========================================================================= */
+
+  const rand = (() => {
+    let s = 0x8f3a2d1b;
+    return () => {
+      s |= 0;
+      s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  })();
+
+  const islandGroups = [];
+
+  function createIsland(x, z, radius, height, seedOffset, cactusCount) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.userData.radius = radius;
+
+    // --- Rugged low-poly rock mound -------------------------------------
+    const radialSegments = 22;
+    const rings = 6;
+    const positions = [];
+    const colors = [];
+    const indices = [];
+    const colRock = new THREE.Color(0x5a5348);
+    const colRockLight = new THREE.Color(0x81776a);
+    const colRockDark = new THREE.Color(0x39342d);
+
+    // summit + concentric rings, with angular and radial irregularity
+    positions.push(radius * 0.05, height * 0.94, -radius * 0.02);
+    colors.push(colRockLight.r, colRockLight.g, colRockLight.b);
+
+    for (let r = 1; r <= rings; r++) {
+      const t = r / rings;
+      const radial = radius * (0.16 + 0.84 * t);
+      for (let s = 0; s < radialSegments; s++) {
+        const a = s / radialSegments * Math.PI * 2;
+        const wobble = 1 + (hash2i(s, r, seedOffset + 17) - 0.5) * (0.16 + 0.18 * t);
+        const rr = radial * wobble;
+        const bumps =
+          0.66 +
+          0.22 * Math.sin(a * 3 + seedOffset) +
+          0.15 * Math.sin(a * 7 + seedOffset * 1.3) +
+          0.08 * Math.cos(a * 11 + seedOffset * 0.7);
+        let y = height * (1 - Math.pow(t, 1.65)) * bumps;
+        y += (hash2i(s, r, seedOffset + 39) - 0.5) * height * 0.16 * (1 - t * 0.4);
+        y = Math.max(0.25, y);
+        positions.push(Math.cos(a) * rr, y, Math.sin(a) * rr * 0.82);
+
+        const shade = 0.42 + hash2i(s, r, seedOffset + 73) * 0.58;
+        const c = colRock.clone().lerp(
+          shade > 0.6 ? colRockLight : colRockDark,
+          Math.abs(shade - 0.58) * 0.9
+        );
+        colors.push(c.r, c.g, c.b);
+      }
+    }
+
+    const vIndex = (r, s) => {
+      if (r === 0) return 0;
+      return 1 + (r - 1) * radialSegments + ((s % radialSegments) + radialSegments) % radialSegments;
+    };
+
+    for (let s = 0; s < radialSegments; s++) {
+      indices.push(0, vIndex(1, s + 1), vIndex(1, s));
+    }
+    for (let r = 1; r < rings; r++) {
+      for (let s = 0; s < radialSegments; s++) {
+        indices.push(vIndex(r, s), vIndex(r, s + 1), vIndex(r + 1, s));
+        indices.push(vIndex(r, s + 1), vIndex(r + 1, s + 1), vIndex(r + 1, s));
+      }
+    }
+
+    // Skirt down below the waterline so no hole is ever visible.
+    const baseStart = positions.length / 3;
+    for (let s = 0; s < radialSegments; s++) {
+      const a = s / radialSegments * Math.PI * 2;
+      const rr = radius * (1 + (hash2i(s, 0, seedOffset + 91) - 0.5) * 0.18);
+      positions.push(Math.cos(a) * rr, -1.8, Math.sin(a) * rr * 0.82);
+      colors.push(colRockDark.r, colRockDark.g, colRockDark.b);
+    }
+    for (let s = 0; s < radialSegments; s++) {
+      const topA = vIndex(rings, s);
+      const topB = vIndex(rings, s + 1);
+      const botA = baseStart + s;
+      const botB = baseStart + (s + 1) % radialSegments;
+      indices.push(topA, topB, botA, topB, botB, botA);
+    }
+
+    const rockGeo = new THREE.BufferGeometry();
+    rockGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    rockGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    rockGeo.setIndex(indices);
+    rockGeo.computeVertexNormals();
+    const rockMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.97,
+      metalness: 0.0,
+      flatShading: true
+    });
+    const rock = new THREE.Mesh(rockGeo, rockMat);
+    rock.receiveShadow = false;
+    rock.castShadow = false;
+    group.add(rock);
+
+    // A few darker, angular boulders at the foot.
+    const boulderMat = new THREE.MeshStandardMaterial({
+      color: 0x50493e,
+      roughness: 1,
+      metalness: 0,
+      flatShading: true
+    });
+    for (let b = 0; b < 5; b++) {
+      const a = rand() * Math.PI * 2;
+      const rr = radius * (0.62 + rand() * 0.35);
+      const scale = radius * (0.10 + rand() * 0.11);
+      const boulder = new THREE.Mesh(new THREE.DodecahedronGeometry(scale, 0), boulderMat);
+      boulder.position.set(Math.cos(a) * rr, scale * 0.22, Math.sin(a) * rr * 0.82);
+      boulder.rotation.set(rand() * 0.8, rand() * Math.PI, rand() * 0.5);
+      boulder.scale.set(1.2 + rand() * 0.7, 0.55 + rand() * 0.6, 0.8 + rand() * 0.5);
+      group.add(boulder);
+    }
+
+    group.userData.cactiSeed = seedOffset;
+    group.userData.cactusCount = cactusCount;
+    group.userData.baseHeight = height;
+
+    scene.add(group);
+    islandGroups.push(group);
+    return group;
+  }
+
+  // The main island sits just left of the vanishing point; the second is
+  // smaller and farther to the right. They share every geometry & material.
+  const islandA = createIsland(-43, -148, 11.5, 6.2, 7, 11);
+  const islandB = createIsland(77, -268, 14.5, 6.4, 19, 9);
+  createIsland(-286, -690, 8.5, 3.6, 31, 3);
+  createIsland(468, -960, 10.5, 4.0, 43, 2);
+  createIsland(-680, -1240, 13.0, 4.8, 57, 0);
+
+  // --- Cacti: one shared cylindrical segment, drawn with InstancedMesh ----
+  const cactusSegmentGeo = new THREE.CylinderGeometry(0.62, 0.86, 1, 8, 1, false);
+  cactusSegmentGeo.translate(0, 0.5, 0);
+  const cactusCapGeo = new THREE.SphereGeometry(1, 8, 6);
+
+  const cactusMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.86,
+    metalness: 0.0,
+    flatShading: true
+  });
+
+  const cactusTransforms = [];
+  const cactusColors = [];
+  const cactusCapTransforms = [];
+  const cactusCapColors = [];
+  const _cCapScale = new THREE.Vector3();
+  const _cUp = new THREE.Vector3(0, 1, 0);
+  const _cDir = new THREE.Vector3();
+  const _cQuat = new THREE.Quaternion();
+  const _cScale = new THREE.Vector3();
+  const _cPos = new THREE.Vector3();
+  const _cMat = new THREE.Matrix4();
+
+  function pushCactusSegment(start, end, radiusScale, tint) {
+    _cDir.subVectors(end, start);
+    const length = _cDir.length();
+    if (length < 0.01) return;
+    _cQuat.setFromUnitVectors(_cUp, _cDir.clone().normalize());
+    _cPos.addVectors(start, end).multiplyScalar(0.5);
+    _cScale.set(radiusScale, length, radiusScale);
+    _cMat.compose(_cPos, _cQuat, _cScale);
+    cactusTransforms.push(_cMat.clone());
+    cactusColors.push(tint);
+  }
+
+  function pushCactusCap(center, radius, tint) {
+    _cCapScale.set(radius, radius * 0.92, radius);
+    _cMat.compose(center, _cQuat.identity(), _cCapScale);
+    cactusCapTransforms.push(_cMat.clone());
+    cactusCapColors.push(tint);
+  }
+
+  function addCactus(baseX, baseY, baseZ, height, rng) {
+    const tiltA = rng() * Math.PI * 2;
+    const lean = 0.05 + rng() * 0.14;
+    const width = 0.82 + rng() * 0.24;
+    const green = new THREE.Color(0x62784f).offsetHSL(
+      (rng() - 0.5) * 0.03,
+      (rng() - 0.5) * 0.07,
+      (rng() - 0.5) * 0.07
+    );
+
+    const root = new THREE.Vector3(baseX, baseY - 0.25, baseZ);
+    const knee = new THREE.Vector3(
+      baseX + Math.cos(tiltA) * lean * height * 0.55,
+      baseY + height * 0.52,
+      baseZ + Math.sin(tiltA) * lean * height * 0.55
+    );
+    const top = new THREE.Vector3(
+      baseX + Math.cos(tiltA) * lean * height,
+      baseY + height,
+      baseZ + Math.sin(tiltA) * lean * height
+    );
+    pushCactusSegment(root, knee, width, green);
+    pushCactusSegment(knee, top, width * 0.78, green);
+    pushCactusCap(top, width * 0.49, green);
+
+    // Two arms, each with an elbow: the recognisable silhouette.
+    const armCount = rng() < 0.22 ? 1 : 2;
+    for (let arm = 0; arm < armCount; arm++) {
+      const frac = 0.42 + rng() * 0.28;
+      const anchor = root.clone().lerp(top, frac);
+      const side = arm === 0 ? 1 : -1;
+      const az = tiltA + side * (0.8 + rng() * 0.9);
+      const outLen = height * (0.18 + rng() * 0.13);
+      const elbow = new THREE.Vector3(
+        anchor.x + Math.cos(az) * outLen,
+        anchor.y + height * 0.09,
+        anchor.z + Math.sin(az) * outLen
+      );
+      const tip = new THREE.Vector3(
+        elbow.x + Math.cos(az) * outLen * 0.16,
+        elbow.y + height * (0.24 + rng() * 0.16),
+        elbow.z + Math.sin(az) * outLen * 0.16
+      );
+      pushCactusSegment(anchor, elbow, width * 0.58, green);
+      pushCactusSegment(elbow, tip, width * 0.52, green);
+      pushCactusCap(tip, width * 0.325, green);
+    }
+  }
+
+  for (const island of islandGroups) {
+    const radius = island.userData.radius;
+    const n = island.userData.cactusCount;
+    const seed = island.userData.cactiSeed;
+    const baseH = island.userData.baseHeight;
+    for (let i = 0; i < n; i++) {
+      const a = rand() * Math.PI * 2;
+      const rr = radius * (0.12 + Math.sqrt(rand()) * 0.52);
+      const localX = Math.cos(a) * rr;
+      const localZ = Math.sin(a) * rr * 0.82;
+      const topFactor = Math.sqrt(Math.max(0, 1 - (rr / (radius * 1.06)) * (rr / (radius * 1.06))));
+      const y = island.position.y + baseH * topFactor * 0.78 + 0.25;
+      const h = 4.7 + rand() * 3.1 + (rr < radius * 0.3 ? 0.8 : 0);
+      addCactus(
+        island.position.x + localX,
+        y,
+        island.position.z + localZ,
+        h,
+        rand
+      );
+    }
+  }
+
+  const cactusMesh = new THREE.InstancedMesh(cactusSegmentGeo, cactusMaterial, cactusTransforms.length);
+  cactusMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  for (let i = 0; i < cactusTransforms.length; i++) {
+    cactusMesh.setMatrixAt(i, cactusTransforms[i]);
+    cactusMesh.setColorAt(i, cactusColors[i]);
+  }
+  cactusMesh.instanceMatrix.needsUpdate = true;
+  if (cactusMesh.instanceColor) cactusMesh.instanceColor.needsUpdate = true;
+  cactusMesh.frustumCulled = false;
+  scene.add(cactusMesh);
+
+  const cactusCapMesh = new THREE.InstancedMesh(cactusCapGeo, cactusMaterial, cactusCapTransforms.length);
+  cactusCapMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  for (let i = 0; i < cactusCapTransforms.length; i++) {
+    cactusCapMesh.setMatrixAt(i, cactusCapTransforms[i]);
+    cactusCapMesh.setColorAt(i, cactusCapColors[i]);
+  }
+  cactusCapMesh.instanceMatrix.needsUpdate = true;
+  if (cactusCapMesh.instanceColor) cactusCapMesh.instanceColor.needsUpdate = true;
+  cactusCapMesh.frustumCulled = false;
+  scene.add(cactusCapMesh);
+
+  /* =========================================================================
+     7. SALT FLAT + SHALLOW WATER SURFACE
+     A single shaded surface encodes all four material zones (dry salt, damp
+     crust, shallow water, mirror water) to avoid transparency sorting and
+     overdraw. Its reflection is a low-resolution planar render target.
+     ========================================================================= */
+
+  const surfaceVertex = /* glsl */`
+    uniform mat4 uReflectionMatrix;
+    varying vec3 vWorldPos;
+    varying vec4 vReflCoord;
+    void main() {
+      vec4 world = modelMatrix * vec4(position, 1.0);
+      vWorldPos = world.xyz;
+      vReflCoord = uReflectionMatrix * world;
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `;
+
+  const surfaceFragment = /* glsl */`
+    precision highp float;
+
+    uniform sampler2D uSalt;
+    uniform sampler2D uSaltNormal;
+    uniform sampler2D uRipple;
+    uniform sampler2D uNoise;
+    uniform sampler2D uReflection;
+
+    uniform vec3 uSaltWhite;
+    uniform vec3 uSaltWarm;
+    uniform vec3 uSaltCool;
+    uniform vec3 uWaterTint;
+    uniform vec3 uGlintColor;
+    uniform vec3 uFogColor;
+    uniform vec3 uHazeSun;
+    uniform vec3 uSunColor;
+    uniform vec3 uSunLightColor;
+    uniform vec3 uMoonLightColor;
+    uniform vec3 uHemiSky;
+    uniform vec3 uHemiGround;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uSunDir;
+    uniform vec3 uMoonDir;
+
+    uniform float uTime;
+    uniform float uSunLightIntensity;
+    uniform float uMoonLightIntensity;
+    uniform float uHemiIntensity;
+    uniform float uAmbientIntensity;
+    uniform float uReflectionStrength;
+    uniform float uReflectionBlur;
+    uniform float uGlintStrength;
+    uniform float uChop;
+    uniform float uHazeAmount;
+    uniform float uFogDensity;
+
+    varying vec3 vWorldPos;
+    varying vec4 vReflCoord;
+
+    #define PI 3.14159265359
+
+    float hash12(vec2 p) {
+      vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+      p3 += dot(p3, p3.yzx + 33.33);
+      return fract((p3.x + p3.y) * p3.z);
+    }
+
+    vec2 rotate(vec2 p, float a) {
+      float s = sin(a), c = cos(a);
+      return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+    }
+
+    void main() {
+      vec2 p = vWorldPos.xz;
+      vec3 toCam = cameraPosition - vWorldPos;
+      float dist = length(toCam);
+      vec3 viewDir = toCam / max(dist, 0.001);
+      float farFade = smoothstep(60.0, 1500.0, dist);
+
+      // ---------------------------------------------------------------
+      // Wetness: broad, organic sheets of water instead of a uniform lake.
+      // The field is pushed to full wetness in the middle distance so the
+      // horizon remains a clean mirror.
+      // ---------------------------------------------------------------
+      float wA = texture2D(uNoise, p * 0.0022 + vec2(0.14, 0.55)).r;
+      float wB = texture2D(uNoise, p * 0.0085 + vec2(0.66, 0.18)).g;
+      float wC = texture2D(uNoise, p * 0.0310 + vec2(0.31, 0.73)).b;
+      float wetField = wA * 0.42 + wB * 0.36 + wC * 0.22;
+      float edge = (texture2D(uNoise, p * 0.081 + vec2(0.44, 0.09)).r - 0.5) * 0.03;
+      wetField += edge;
+
+      float wet = smoothstep(0.19, 0.40, wetField);
+      float damp = smoothstep(0.14, 0.34, wetField);
+      float mirror = smoothstep(0.24, 0.46, wetField);
+      float farWet = smoothstep(120.0, 650.0, dist);
+      wet = mix(wet, 1.0, farWet);
+      mirror = mix(mirror, 1.0, farWet * 0.94);
+
+      // ---------------------------------------------------------------
+      // Salt crust — ivory and cool-grey mineral modulation, two scales of
+      // the generated crust texture, faded gently with distance.
+      // ---------------------------------------------------------------
+      float macroWarm = texture2D(uNoise, p * 0.0011 + vec2(0.51, 0.30)).r;
+      float macroCool = texture2D(uNoise, p * 0.00053 + vec2(0.23, 0.81)).g;
+      vec3 saltCol = mix(uSaltWarm, uSaltWhite, smoothstep(0.28, 0.74, macroWarm));
+      saltCol = mix(saltCol, uSaltCool, smoothstep(0.44, 0.82, macroCool) * 0.34);
+
+      vec2 saltUvA = p * 0.090;
+      vec2 saltUvB = rotate(p, 0.61) * 0.028 + vec2(0.37, 0.21);
+      vec3 saltA = texture2D(uSalt, saltUvA).rgb;
+      vec3 saltB = texture2D(uSalt, saltUvB).rgb;
+      float saltDetailFade = 1.0 - smoothstep(18.0, 240.0, dist);
+      vec3 saltTex = mix(saltB, saltA, mix(0.35, 0.8, saltDetailFade));
+      saltCol *= mix(vec3(0.945), saltTex * 1.12, mix(0.74, 0.97, saltDetailFade));
+
+      // A faint blue-grey veil where water is thin, never brown or muddy.
+      vec3 wetSalt = mix(saltCol, saltCol * uWaterTint * 1.35 + uWaterTint * 0.02, 0.08 + damp * 0.22);
+      wetSalt *= mix(1.0, 0.935, wet);
+
+      // A slightly brighter, drier lip right at the waterline gives the
+      // shallow sheets a readable edge without drawing a hard outline.
+      float shore = smoothstep(0.255, 0.315, wetField) * (1.0 - smoothstep(0.315, 0.40, wetField));
+      wetSalt *= 1.0 + shore * 0.035;
+
+      // ---------------------------------------------------------------
+      // Surface lighting. The flat surface uses the same sun/moon/hemi
+      // palette as the rest of the scene, so transitions stay coherent.
+      // ---------------------------------------------------------------
+      vec3 ambient = (uHemiSky * 0.72 + uHemiGround * 0.28) * uHemiIntensity * 0.52
+                   + uAmbientColor * uAmbientIntensity;
+      float sunUp = max(uSunDir.y, 0.0);
+      float moonUp = max(uMoonDir.y, 0.0);
+      vec3 direct = uSunLightColor * uSunLightIntensity * (0.35 + 0.65 * sunUp) * sunUp
+                  + uMoonLightColor * uMoonLightIntensity * (0.25 + 0.75 * moonUp) * moonUp;
+      // Salt has a very high albedo, but the whole scene is displayed through
+      // ACES: keep the crust near 1.0 in linear light so the mirror still reads.
+      vec3 litSalt = wetSalt * (ambient + direct * 0.94) * 0.55;
+
+      // Delicate caustic-like variation in the shallowest foreground.
+      float nearWater = (1.0 - smoothstep(8.0, 105.0, dist)) * wet;
+      float causticField = texture2D(uNoise, p * 0.17 + vec2(uTime * 0.0031, -uTime * 0.0021)).b;
+      float caustic = pow(max(0.0, (causticField - 0.52) / 0.48), 3.0);
+      litSalt += uSunColor * caustic * 0.045 * uSunLightIntensity * nearWater * (1.0 - farWet);
+
+      // ---------------------------------------------------------------
+      // Ripples — two very slow normal fields plus long, almost imperceptible
+      // swells. Slopes stay tiny: this is a film of water, not an ocean.
+      // ---------------------------------------------------------------
+      vec2 rippleUvA = p * 0.115 + vec2(uTime * 0.0011, uTime * -0.0007);
+      vec2 rippleUvB = rotate(p, 1.21) * 0.037 + vec2(-uTime * 0.0006, uTime * 0.0009);
+      vec2 rippleA = texture2D(uRipple, rippleUvA).rg * 2.0 - 1.0;
+      vec2 rippleB = texture2D(uRipple, rippleUvB).rg * 2.0 - 1.0;
+      vec2 slope = rippleA * 0.55 + rippleB * 0.75;
+
+      float swell1 = sin(dot(p, vec2(0.052, 0.079)) + uTime * 0.085);
+      float swell2 = cos(dot(p, vec2(-0.091, 0.037)) + uTime * 0.061);
+      slope += vec2(swell1, swell2) * 0.11;
+
+      float rippleDetail = 1.0 - smoothstep(35.0, 950.0, dist);
+      slope *= mix(0.12, 1.0, rippleDetail) * 0.072 * uChop;
+      vec3 waterNormal = normalize(vec3(slope.x, 1.0, slope.y));
+
+      // ---------------------------------------------------------------
+      // Planar reflection, with a slow ripple distortion and a tiny
+      // self-shadowing of the crests. Four soft taps are used only when the
+      // weather calls for a diffused reflection.
+      // ---------------------------------------------------------------
+      vec2 reflUv = vReflCoord.xy / max(vReflCoord.w, 0.0001);
+      vec2 distort = waterNormal.xz * mix(0.013, 0.031, 1.0 - farFade);
+      reflUv = clamp(reflUv + distort, vec2(0.002), vec2(0.998));
+
+      vec3 refl = texture2D(uReflection, reflUv).rgb;
+      if (uReflectionBlur > 0.00001) {
+        float br = uReflectionBlur;
+        refl += texture2D(uReflection, clamp(reflUv + vec2(br, 0.0), vec2(0.002), vec2(0.998))).rgb;
+        refl += texture2D(uReflection, clamp(reflUv + vec2(0.0, br), vec2(0.002), vec2(0.998))).rgb;
+        refl += texture2D(uReflection, clamp(reflUv - vec2(br, br), vec2(0.002), vec2(0.998))).rgb;
+        refl *= 0.25;
+      }
+
+      // Keep the reflected sky clean and luminous; only a whisper of the
+      // water tint keeps it from looking like a compositing trick.
+      refl *= mix(vec3(1.0), uWaterTint * 1.35, 0.025);
+
+      float NdotV = clamp(dot(waterNormal, viewDir), 0.0, 1.0);
+      // A thin film over white salt reflects a little more than open water at
+      // steep angles; the lift keeps the foreground from going chalk-white.
+      float fresnel = 0.30 + 0.70 * pow(1.0 - NdotV, 2.5);
+      float mirrorWeight = clamp(
+        uReflectionStrength * wet * (0.10 + 0.90 * fresnel) * (0.46 + 0.54 * mirror),
+        0.0, 0.972
+      );
+
+      vec3 col = mix(litSalt, refl, mirrorWeight);
+
+      // A cool, very thin film colour in the translucent shallows.
+      col += uWaterTint * (1.0 - mirrorWeight) * wet * 0.025;
+
+      // Sun/moon glints: broad enough to read as a reflection path, narrow
+      // enough not to become a decorative spotlight.
+      vec3 reflectedDir = reflect(-viewDir, waterNormal);
+      float sunDot = max(dot(reflectedDir, uSunDir), 0.0);
+      float moonDot = max(dot(reflectedDir, uMoonDir), 0.0);
+      float sunSpec = pow(sunDot, 900.0) * 2.4 + pow(sunDot, 60.0) * 0.30;
+      float moonSpec = pow(moonDot, 1200.0) * 1.6 + pow(moonDot, 90.0) * 0.06;
+      vec3 specular = uGlintColor * (
+        sunSpec * uSunLightIntensity * 0.12 * uGlintStrength +
+        moonSpec * uMoonLightIntensity * 0.10
+      ) * wet * (0.45 + 0.55 * mirror);
+      col += specular;
+
+      // Tiny crystalline sparkle on salt and water in the near field.
+      float sparkleHash = texture2D(uNoise, p * 4.7 + vec2(uTime * 0.003, -uTime * 0.002)).b;
+      float sparkle = smoothstep(0.965, 0.995, sparkleHash) * (1.0 - smoothstep(3.0, 110.0, dist));
+      col += uGlintColor * sparkle * 0.018 * (uSunLightIntensity + uMoonLightIntensity) * uGlintStrength;
+
+      // ---------------------------------------------------------------
+      // Atmospheric perspective. A squared exponential keeps the middle
+      // distance clear while dissolving the finite plane into the horizon.
+      // ---------------------------------------------------------------
+      float fogFactor = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
+      fogFactor = max(fogFactor, smoothstep(15000.0, 30000.0, dist));
+
+      vec3 groundDir = normalize(vWorldPos - cameraPosition + vec3(0.0001, 0.0, 0.0));
+      vec3 sunHoriz = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0001, 0.0, 0.0));
+      float sunAz = pow(max(dot(normalize(vec3(groundDir.x, 0.0, groundDir.z)), sunHoriz), 0.0), 5.0);
+      vec3 fogCol = mix(uFogColor, uHazeSun, sunAz * clamp(uSunLightIntensity * 0.22, 0.0, 0.5));
+      fogCol = mix(fogCol, uHazeSun, 0.0);
+      col = mix(col, fogCol, clamp(fogFactor, 0.0, 0.998));
+
+      // Dither the long gradients.
+      col += (hash12(gl_FragCoord.xy + fract(uTime) * 19.3) - 0.5) * 0.0014;
+      gl_FragColor = vec4(max(col, vec3(0.0)), 1.0);
+
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `;
+
+  const reflectionTarget = new THREE.WebGLRenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    depthBuffer: true,
+    stencilBuffer: false
+  });
+  reflectionTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
+  reflectionTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
+  reflectionTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
+  reflectionTarget.texture.generateMipmaps = false;
+
+  const reflectionMatrix = new THREE.Matrix4();
+
+  const surfaceMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uSalt: { value: saltTexture },
+      uSaltNormal: { value: saltNormalTexture },
+      uRipple: { value: rippleTexture },
+      uNoise: { value: cloudNoiseTexture },
+      uReflection: { value: reflectionTarget.texture },
+      uReflectionMatrix: { value: reflectionMatrix },
+      uSaltWhite: { value: new THREE.Color() },
+      uSaltWarm: { value: new THREE.Color() },
+      uSaltCool: { value: new THREE.Color() },
+      uWaterTint: { value: new THREE.Color() },
+      uGlintColor: { value: new THREE.Color() },
+      uFogColor: { value: new THREE.Color() },
+      uHazeSun: { value: new THREE.Color() },
+      uSunColor: { value: new THREE.Color() },
+      uSunLightColor: { value: new THREE.Color() },
+      uMoonLightColor: { value: new THREE.Color() },
+      uHemiSky: { value: new THREE.Color() },
+      uHemiGround: { value: new THREE.Color() },
+      uAmbientColor: { value: new THREE.Color() },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+      uTime: { value: 0 },
+      uSunLightIntensity: { value: 2.45 },
+      uMoonLightIntensity: { value: 0 },
+      uHemiIntensity: { value: 1.1 },
+      uAmbientIntensity: { value: 0.1 },
+      uReflectionStrength: { value: 1 },
+      uReflectionBlur: { value: 0.00035 },
+      uGlintStrength: { value: 1 },
+      uChop: { value: 1 },
+      uHazeAmount: { value: 0.7 },
+      uFogDensity: { value: 0.000052 }
+    },
+    vertexShader: surfaceVertex,
+    fragmentShader: surfaceFragment,
+    fog: false
+  });
+
+  const saltSurface = new THREE.Mesh(new THREE.PlaneGeometry(62000, 62000), surfaceMaterial);
+  saltSurface.rotation.x = -Math.PI / 2;
+  saltSurface.position.y = 0;
+  scene.add(saltSurface);
+
+  /* =========================================================================
+     8. STATE → UNIFORMS
+     ========================================================================= */
+
+  const _colA = new THREE.Color();
+  const _colB = new THREE.Color();
+  const lightCenter = new THREE.Vector3(0, 0, -90);
+
+  function applyLiveState(elapsed) {
+    const c = app.live.colors;
+    const n = app.live.numbers;
+    const v = app.live.vectors;
+
+    // --- Sky ------------------------------------------------------------
+    const su = skyMaterial.uniforms;
+    su.uZenith.value.copy(c.skyZenith);
+    su.uMid.value.copy(c.skyMid);
+    su.uHorizon.value.copy(c.skyHorizon);
+    su.uHaze.value.copy(c.hazeColor);
+    su.uHazeSun.value.copy(c.hazeSunColor);
+    su.uSunColor.value.copy(c.sunColor);
+    su.uSunGlow.value.copy(c.sunGlowColor);
+    su.uMoonColor.value.copy(c.moonColor);
+    su.uCloudLit.value.copy(c.cloudLit);
+    su.uCloudShadow.value.copy(c.cloudShadow);
+    su.uCloudWarm.value.copy(c.cloudWarm);
+    su.uSunDir.value.copy(v.sunDir);
+    su.uMoonDir.value.copy(v.moonDir);
+    su.uSunDisk.value = n.sunDiskIntensity;
+    su.uSunGlowIntensity.value = n.sunGlowIntensity;
+    su.uMoonDisk.value = n.moonDiskIntensity;
+    su.uMoonGlowIntensity.value = n.moonGlowIntensity;
+    su.uCloudCover.value = n.cloudCover;
+    su.uCloudOpacity.value = n.cloudOpacity;
+    su.uCirrusOpacity.value = n.cirrusOpacity;
+    su.uOvercastness.value = n.overcastness;
+    su.uStarVisibility.value = n.starVisibility;
+    su.uMilkyVisibility.value = n.milkyVisibility;
+    su.uHazeAmount.value = n.hazeAmount;
+    su.uTime.value = elapsed;
+
+    // --- Ground / water -------------------------------------------------
+    const gu = surfaceMaterial.uniforms;
+    gu.uSaltWhite.value.copy(c.saltWhite);
+    gu.uSaltWarm.value.copy(c.saltWarm);
+    gu.uSaltCool.value.copy(c.saltCool);
+    gu.uWaterTint.value.copy(c.waterTint);
+    gu.uGlintColor.value.copy(c.glintColor);
+    gu.uFogColor.value.copy(c.fogColor);
+    gu.uHazeSun.value.copy(c.hazeSunColor);
+    gu.uSunColor.value.copy(c.sunColor);
+    gu.uSunLightColor.value.copy(c.sunLightColor);
+    gu.uMoonLightColor.value.copy(c.moonLightColor);
+    gu.uHemiSky.value.copy(c.hemiSky);
+    gu.uHemiGround.value.copy(c.hemiGround);
+    gu.uAmbientColor.value.copy(c.ambientColor);
+    gu.uSunDir.value.copy(v.sunDir);
+    gu.uMoonDir.value.copy(v.moonDir);
+    gu.uSunLightIntensity.value = n.sunLightIntensity;
+    gu.uMoonLightIntensity.value = n.moonLightIntensity;
+    gu.uHemiIntensity.value = n.hemiIntensity;
+    gu.uAmbientIntensity.value = n.ambientIntensity;
+    gu.uReflectionStrength.value = n.reflectionStrength;
+    gu.uReflectionBlur.value = n.reflectionBlur;
+    gu.uGlintStrength.value = n.glintStrength;
+    gu.uChop.value = n.chop;
+    gu.uHazeAmount.value = n.hazeAmount;
+    gu.uFogDensity.value = n.fogDensity;
+    gu.uTime.value = elapsed;
+
+    // --- Lights (used by islands, cacti and the standard-material props) --
+    sunLight.color.copy(c.sunLightColor);
+    sunLight.intensity = n.sunLightIntensity;
+    sunLight.position.copy(lightCenter).addScaledVector(v.sunDir, 9000);
+    sunLight.target.position.copy(lightCenter);
+
+    moonLight.color.copy(c.moonLightColor);
+    moonLight.intensity = n.moonLightIntensity;
+    moonLight.position.copy(lightCenter).addScaledVector(v.moonDir, 9000);
+    moonLight.target.position.copy(lightCenter);
+
+    hemiLight.color.copy(c.hemiSky);
+    hemiLight.groundColor.copy(c.hemiGround);
+    hemiLight.intensity = n.hemiIntensity;
+
+    ambientLight.color.copy(c.ambientColor);
+    ambientLight.intensity = n.ambientIntensity;
+
+    // --- Atmosphere -----------------------------------------------------
+    scene.fog.color.copy(c.fogColor);
+    scene.fog.density = n.fogDensity;
+    renderer.toneMappingExposure = n.exposure;
+
+    // --- Mountains ------------------------------------------------------
+    for (const mat of mountainMaterials) {
+      const u = mat.uniforms;
+      const far = mat.userData.far;
+      u.uHaze.value.copy(c.fogColor).lerp(c.hazeColor, 0.34);
+      if (far) {
+        _colA.copy(c.mountainHigh).lerp(c.fogColor, 0.16);
+        _colB.copy(c.mountainLow).lerp(c.mountainHigh, 0.58);
+        u.uBase.value.copy(_colA);
+        u.uPeak.value.copy(_colB);
+      } else {
+        _colA.copy(c.mountainHigh);
+        _colB.copy(c.mountainLow);
+        u.uBase.value.copy(_colA);
+        u.uPeak.value.copy(_colB);
+      }
+      u.uSunDir.value.copy(v.sunDir);
+      _colA.copy(c.sunGlowColor).lerp(c.moonColor, clamp(n.moonLightIntensity / 0.7, 0, 0.55));
+      u.uRimColor.value.copy(_colA);
+      const rimBase = far ? 0.11 : 0.2;
+      u.uRimStrength.value = rimBase * clamp(n.sunLightIntensity * 0.42 + n.moonLightIntensity * 0.12, 0, 1.15);
+      u.uHazeMix.value = mat.userData.hazeMix * (0.9 + n.hazeAmount * 0.22);
+    }
+  }
+
+  /* =========================================================================
+     8.5 CLICK EASTER EGG (concentric ripples + salt spray) AND LOW MIST
+     Both are pooled once and only toggled per frame — no allocation at runtime.
+     ========================================================================= */
+
+  const rippleGeo = new THREE.RingGeometry(0.66, 1.0, 72);
+  const ripplePool = [];
+  const rippleGroup = new THREE.Group();
+  scene.add(rippleGroup);
+  const RIPPLE_SLOTS = MOBILE ? 8 : 16;
+  for (let i = 0; i < RIPPLE_SLOTS; i++) {
+    const mesh = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({
+      color: 0xe4f6ff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      fog: false
+    }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    mesh.renderOrder = 8;
+    rippleGroup.add(mesh);
+    ripplePool.push({ mesh, t: 0, life: 2.6, r0: 1, r1: 10 });
+  }
+  let rippleCursor = 0;
+
+  const SPRAY_COUNT = MOBILE ? 48 : 108;
+  const sprayPositions = new Float32Array(SPRAY_COUNT * 3);
+  const sprayVelocity = new Float32Array(SPRAY_COUNT * 3);
+  const sprayLife = new Float32Array(SPRAY_COUNT);
+  for (let i = 0; i < SPRAY_COUNT; i++) sprayPositions[i * 3 + 1] = -9999;
+  const sprayGeometry = new THREE.BufferGeometry();
+  sprayGeometry.setAttribute('position', new THREE.BufferAttribute(sprayPositions, 3));
+  const sprayMaterial = new THREE.PointsMaterial({
+    color: 0xf2fbff,
+    size: 0.13,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false
+  });
+  const sprayPoints = new THREE.Points(sprayGeometry, sprayMaterial);
+  sprayPoints.frustumCulled = false;
+  sprayPoints.visible = false;
+  sprayPoints.renderOrder = 9;
+  scene.add(sprayPoints);
+  let sprayCursor = 0;
+  let sprayAlive = 0;
+
+  function spawnSpray(point) {
+    const n = MOBILE ? 22 : 40;
+    for (let i = 0; i < n; i++) {
+      const idx = sprayCursor % SPRAY_COUNT;
+      sprayCursor++;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 1.6;
+      sprayPositions[idx * 3] = point.x + Math.cos(a) * r;
+      sprayPositions[idx * 3 + 1] = 0.06 + Math.random() * 0.14;
+      sprayPositions[idx * 3 + 2] = point.z + Math.sin(a) * r;
+      const speed = 0.7 + Math.random() * 1.9;
+      sprayVelocity[idx * 3] = Math.cos(a) * speed * 0.5;
+      sprayVelocity[idx * 3 + 1] = 1.5 + Math.random() * 2.6;
+      sprayVelocity[idx * 3 + 2] = Math.sin(a) * speed * 0.5;
+      sprayLife[idx] = 0.85 + Math.random() * 0.55;
+    }
+    sprayAlive = Math.min(SPRAY_COUNT, sprayAlive + n);
+    sprayPoints.visible = true;
+  }
+
+  function spawnRipples(point) {
+    const rings = 4;
+    for (let i = 0; i < rings; i++) {
+      const slot = ripplePool[(rippleCursor + i) % ripplePool.length];
+      slot.mesh.position.set(point.x, 0.02 + i * 0.0015, point.z);
+      slot.mesh.visible = true;
+      slot.mesh.scale.setScalar(1);
+      slot.mesh.material.opacity = 0;
+      slot.t = -i * 0.24;
+      slot.life = 2.8;
+      slot.r0 = 1.1 + i * 0.7;
+      slot.r1 = 13 + i * 8;
+    }
+    rippleCursor = (rippleCursor + rings) % ripplePool.length;
+    spawnSpray(point);
+  }
+
+  function updateRipples(dt) {
+    for (const r of ripplePool) {
+      if (!r.mesh.visible) continue;
+      r.t += dt;
+      if (r.t < 0) continue;
+      const p = r.t / r.life;
+      if (p >= 1) {
+        r.mesh.visible = false;
+        r.mesh.material.opacity = 0;
+        continue;
+      }
+      const scale = r.r0 + (r.r1 - r.r0) * Math.pow(p, 0.55);
+      r.mesh.scale.setScalar(scale);
+      r.mesh.material.opacity = Math.pow(1 - p, 1.8) * 0.46;
+    }
+  }
+
+  let sprayNeedsUpdate = false;
+  function updateSpray(dt) {
+    if (sprayAlive <= 0) {
+      if (sprayPoints.visible) sprayPoints.visible = false;
+      return;
+    }
+    let alive = 0;
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+      if (sprayLife[i] <= 0) continue;
+      sprayLife[i] -= dt;
+      if (sprayLife[i] <= 0) {
+        sprayPositions[i * 3 + 1] = -9999;
+        continue;
+      }
+      sprayVelocity[i * 3 + 1] -= 7.2 * dt;
+      sprayPositions[i * 3] += sprayVelocity[i * 3] * dt;
+      sprayPositions[i * 3 + 1] += sprayVelocity[i * 3 + 1] * dt;
+      sprayPositions[i * 3 + 2] += sprayVelocity[i * 3 + 2] * dt;
+      if (sprayPositions[i * 3 + 1] < 0.02) {
+        sprayLife[i] = 0;
+        sprayPositions[i * 3 + 1] = -9999;
+        continue;
+      }
+      alive++;
+    }
+    sprayAlive = alive;
+    sprayNeedsUpdate = true;
+    if (sprayNeedsUpdate) {
+      sprayGeometry.attributes.position.needsUpdate = true;
+      sprayNeedsUpdate = false;
+    }
+    sprayPoints.visible = alive > 0;
+  }
+
+  // --- Low mist banks: horizontal, soft-edged, drifting slowly -----------
+  const mistTexture = (() => {
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, 'rgba(255,255,255,0.90)');
+    grad.addColorStop(0.42, 'rgba(255,255,255,0.42)');
+    grad.addColorStop(0.74, 'rgba(255,255,255,0.12)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  })();
+
+  const mistLayers = [];
+  (function buildMistBanks() {
+    const count = MOBILE ? 5 : 10;
+    let seedState = 0x2f6c1b;
+    const rnd = () => {
+      seedState = (seedState * 1664525 + 1013904223) >>> 0;
+      return seedState / 4294967296;
+    };
+    for (let i = 0; i < count; i++) {
+      const w = 260 + rnd() * 520;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, w * 0.52),
+        new THREE.MeshBasicMaterial({
+          map: mistTexture,
+          color: 0xdfeef2,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: false
+        })
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(
+        (rnd() - 0.5) * 900,
+        0.85 + rnd() * 1.9,
+        -70 - rnd() * 1150
+      );
+      mesh.renderOrder = 4;
+      scene.add(mesh);
+      mistLayers.push({
+        mesh,
+        base: 0.026 + rnd() * 0.042,
+        phase: rnd() * Math.PI * 2,
+        drift: 0.25 + rnd() * 0.55
+      });
+    }
+  })();
+
+  function updateMist(elapsedTime) {
+    for (const layer of mistLayers) {
+      const pulse = 0.62 + 0.38 * Math.sin(elapsedTime * 0.09 + layer.phase);
+      layer.mesh.material.opacity = layer.base * pulse;
+      layer.mesh.material.color.copy(scene.fog.color);
+      layer.mesh.position.x += Math.sin(elapsedTime * 0.035 + layer.phase) * layer.drift * 0.012;
+    }
+  }
+
+  const clickRaycaster = new THREE.Raycaster();
+  const clickPointer = new THREE.Vector2();
+  const clickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const clickHit = new THREE.Vector3();
+  let pressX = 0;
+  let pressY = 0;
+  let pressTime = 0;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    pressX = e.clientX;
+    pressY = e.clientY;
+    pressTime = performance.now();
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (Math.hypot(e.clientX - pressX, e.clientY - pressY) > 7) return;
+    if (performance.now() - pressTime > 700) return;
+    clickPointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+    clickPointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    clickRaycaster.setFromCamera(clickPointer, camera);
+    if (!clickRaycaster.ray.intersectPlane(clickPlane, clickHit)) return;
+    if (clickHit.distanceTo(camera.position) > 1400) return;
+    spawnRipples(clickHit);
+    hideHint();
+  });
+
+  /* =========================================================================
+     8.6 WEATHER PARTICLES — 3D rain + storm lightning
+     The rain lives inside the scene rather than in a CSS overlay, so the planar
+     reflection actually picks it up: drizzle dimples the mirror, a storm shreds
+     it. That is the difference the presets are supposed to communicate.
+     ========================================================================= */
+
+  const RAIN_COUNT = MOBILE ? 320 : 900;
+  const RAIN_SPAN = { w: 72, h: 36, d: 72 };
+  const rainPositions = new Float32Array(RAIN_COUNT * 6);
+  const rainDrops = [];
+  for (let i = 0; i < RAIN_COUNT; i++) {
+    rainDrops.push({
+      x: (Math.random() - 0.5) * RAIN_SPAN.w,
+      y: Math.random() * RAIN_SPAN.h - 14,
+      z: (Math.random() - 0.5) * RAIN_SPAN.d,
+      len: 0.55 + Math.random() * 1.5,
+      speed: 24 + Math.random() * 20
+    });
+  }
+  const rainGeometry = new THREE.BufferGeometry();
+  rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+  const rainMaterial = new THREE.LineBasicMaterial({
+    color: 0xdae7f1,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    fog: false
+  });
+  const rainLines = new THREE.LineSegments(rainGeometry, rainMaterial);
+  rainLines.frustumCulled = false;
+  rainLines.visible = false;
+  scene.add(rainLines);
+
+  function updateRain(dt) {
+    const wx = app.weather;
+    const amount = wx === 'storm' ? 1 : (wx === 'lightrain' ? 0.52 : 0);
+    if (!amount) {
+      if (rainLines.visible) {
+        rainLines.visible = false;
+        rainMaterial.opacity = 0;
+      }
+      return;
+    }
+    const storm = wx === 'storm';
+    const slantX = storm ? 2.1 : 0.9;
+    const slantZ = storm ? 0.8 : 0.35;
+    const cx = camera.position.x;
+    const cy = camera.position.y;
+    const cz = camera.position.z;
+    const halfW = RAIN_SPAN.w / 2;
+    const halfD = RAIN_SPAN.d / 2;
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      const d = rainDrops[i];
+      d.y -= d.speed * dt * (storm ? 1.45 : 1);
+      if (d.y < -14) d.y += RAIN_SPAN.h;
+      if (d.x - cx > halfW) d.x -= RAIN_SPAN.w;
+      else if (d.x - cx < -halfW) d.x += RAIN_SPAN.w;
+      if (d.z - cz > halfD) d.z -= RAIN_SPAN.d;
+      else if (d.z - cz < -halfD) d.z += RAIN_SPAN.d;
+      const o = i * 6;
+      const wy = cy + d.y;
+      rainPositions[o] = d.x;
+      rainPositions[o + 1] = wy;
+      rainPositions[o + 2] = d.z;
+      rainPositions[o + 3] = d.x - slantX * d.len * 0.42;
+      rainPositions[o + 4] = wy + d.len * (storm ? 2.1 : 1.5);
+      rainPositions[o + 5] = d.z - slantZ * d.len * 0.42;
+    }
+    rainGeometry.attributes.position.needsUpdate = true;
+    // 小雨只画一半的雨丝：密度本身就是"档"的一部分，不只是透明度
+    rainGeometry.setDrawRange(0, storm ? RAIN_COUNT * 2 : Math.round(RAIN_COUNT * 1.1));
+    rainLines.visible = true;
+    rainMaterial.opacity = (storm ? 0.42 : 0.24) * (app.time === 'night' ? 0.68 : 1);
+  }
+
+  // 暴雨闪电：只抬曝光与环境光，不改任何几何；晴天/小雨恒为 0。
+  let lightning = 0;
+  let nextBolt = 5 + Math.random() * 7;
+  function updateLightning(dt) {
+    if (app.weather !== 'storm') {
+      lightning = Math.max(0, lightning - dt * 6);
+      nextBolt = 5 + Math.random() * 7;
+      return;
+    }
+    nextBolt -= dt;
+    if (nextBolt <= 0) {
+      nextBolt = 6 + Math.random() * 10;
+      lightning = 1;
+    }
+    lightning = Math.max(0, lightning - dt * 7.5);
+  }
+
+  /* =========================================================================
+     9. PLANAR REFLECTION (half-resolution, scene only — no ground)
+     ========================================================================= */
+
+  const mirrorCamera = new THREE.PerspectiveCamera(52, 1, 0.4, 220000);
+  const textureBias = new THREE.Matrix4().set(
+    0.5, 0.0, 0.0, 0.5,
+    0.0, 0.5, 0.0, 0.5,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0
+  );
+
+  const _fwd = new THREE.Vector3();
+  const _look = new THREE.Vector3();
+  const _up = new THREE.Vector3();
+
+  let reflectionScale = MOBILE ? 0.4 : 0.6;
+
+  function resizeReflectionTarget() {
+    const drawing = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const cap = MOBILE ? 680 : 1280;
+    let rw = Math.max(280, Math.round(drawing.x * reflectionScale));
+    rw = Math.min(cap, rw);
+    const aspect = camera.aspect;
+    let rh = Math.max(160, Math.round(rw / aspect));
+    rh = Math.min(Math.round(cap * 0.66), rh);
+    reflectionTarget.setSize(rw, rh);
+  }
+
+  function renderPlanarReflection() {
+    const camPos = camera.position;
+
+    _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _look.copy(camPos).addScaledVector(_fwd, 120);
+    _look.y = -_look.y;
+
+    _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    _up.y = -_up.y;
+
+    mirrorCamera.position.set(camPos.x, -camPos.y, camPos.z);
+    mirrorCamera.up.copy(_up);
+    mirrorCamera.lookAt(_look);
+    mirrorCamera.updateMatrixWorld(true);
+    mirrorCamera.projectionMatrix.copy(camera.projectionMatrix);
+    mirrorCamera.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+    mirrorCamera.near = camera.near;
+    mirrorCamera.far = camera.far;
+    mirrorCamera.matrixWorldInverse.copy(mirrorCamera.matrixWorld).invert();
+
+    reflectionMatrix
+      .copy(textureBias)
+      .multiply(mirrorCamera.projectionMatrix)
+      .multiply(mirrorCamera.matrixWorldInverse);
+
+    skyMaterial.uniforms.uInvProjection.value.copy(mirrorCamera.projectionMatrixInverse);
+    skyMaterial.uniforms.uCameraWorld.value.copy(mirrorCamera.matrixWorld);
+
+    saltSurface.visible = false;
+    // The reflection target stores linear light. Tone mapping happens once,
+    // in the salt/water shader, when the mirror is composited on screen.
+    const previousToneMapping = renderer.toneMapping;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.setRenderTarget(reflectionTarget);
+    renderer.clear();
+    renderer.render(scene, mirrorCamera);
+    renderer.setRenderTarget(null);
+    renderer.toneMapping = previousToneMapping;
+    saltSurface.visible = true;
+  }
+
+  resizeReflectionTarget();
+
+  /* =========================================================================
+     10. UI — independent time / weather controls, auto orbit, reset
+     ========================================================================= */
+
+  const timeButtons = Array.from(document.querySelectorAll('#time-options [data-time]'));
+  const weatherButtons = Array.from(document.querySelectorAll('#weather-options [data-weather]'));
+  const orbitButton = document.getElementById('orbit-toggle');
+  const hintEl = document.getElementById('hint');
+
+  function syncPresetButtons() {
+    for (const b of timeButtons) {
+      b.setAttribute('aria-pressed', String(b.dataset.time === app.time));
+    }
+    for (const b of weatherButtons) {
+      b.setAttribute('aria-pressed', String(b.dataset.weather === app.weather));
+    }
+  }
+
+  function selectTime(timeId) {
+    if (app.time === timeId) return;
+    app.time = timeId;
+    app.target = buildPreset(app.time, app.weather);
+    syncPresetButtons();
+    hideHint();
+  }
+
+  function selectWeather(weatherId) {
+    if (app.weather === weatherId) return;
+    app.weather = weatherId;
+    app.target = buildPreset(app.time, app.weather);
+    syncPresetButtons();
+    hideHint();
+  }
+
+  for (const b of timeButtons) b.addEventListener('click', () => selectTime(b.dataset.time));
+  for (const b of weatherButtons) b.addEventListener('click', () => selectWeather(b.dataset.weather));
+
+  function setAutoOrbit(on) {
+    app.autoOrbit = on;
+    controls.autoRotate = on && !resetTween;
+    orbitButton.setAttribute('aria-pressed', String(on));
+  }
+
+  orbitButton.addEventListener('click', () => {
+    setAutoOrbit(!app.autoOrbit);
+    hideHint();
+  });
+
+  let hintHidden = false;
+  function hideHint() {
+    if (hintHidden) return;
+    hintHidden = true;
+    hintEl.classList.add('is-hidden');
+  }
+  setTimeout(hideHint, 11000);
+
+  let resetTween = null;
+
+  // 任何一次飞行（机位预设 / 重置 / 上帝视角）都先把自动环绕真正关掉：
+  // 只改 controls.autoRotate 而不同步 app.autoOrbit，会让按钮和 __bw.orbit 说谎，
+  // 也会让环绕在飞行结束后"自己回来"。
+  function startFly(position, target, duration = 1.95, onDone = null) {
+    resetTween = {
+      t: 0,
+      duration,
+      fromPos: camera.position.clone(),
+      fromTarget: controls.target.clone(),
+      toPos: position.clone(),
+      toTarget: target.clone(),
+      onDone
+    };
+    setAutoOrbit(false);
+    hideHint();
+  }
+
+  const viewButtons = Array.from(document.querySelectorAll('#view-options [data-view]'));
+  function syncViewButtons(activeId) {
+    for (const b of viewButtons) b.setAttribute('aria-pressed', String(b.dataset.view === activeId));
+  }
+  for (const b of viewButtons) {
+    b.addEventListener('click', () => {
+      const preset = VIEW_PRESETS[b.dataset.view];
+      if (!preset) return;
+      startFly(preset.position, preset.target);
+      syncViewButtons(b.dataset.view);
+    });
+  }
+
+  controls.addEventListener('start', () => {
+    hideHint();
+    if (resetTween) {
+      resetTween = null;
+      controls.autoRotate = app.autoOrbit;
+    }
+    if (app.autoOrbit) setAutoOrbit(false);
+  });
+
+  /* ---------- 方向键平移 / 双击复位（v1） ---------- */
+  const navKeys = Object.create(null);
+  function isNavKey(k) {
+    return k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight' ||
+      k === 'w' || k === 'a' || k === 's' || k === 'd' ||
+      k === 'W' || k === 'A' || k === 'S' || k === 'D';
+  }
+  window.addEventListener('keydown', (e) => {
+    if (!isNavKey(e.key)) return;
+    navKeys[e.key] = true;
+    if (app.autoOrbit) setAutoOrbit(false);
+    e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => { if (isNavKey(e.key)) navKeys[e.key] = false; });
+  window.addEventListener('blur', () => { for (const k in navKeys) navKeys[k] = false; });
+  function applyArrowPan(dt) {
+    const kf = ((navKeys.ArrowUp || navKeys.w || navKeys.W) ? 1 : 0) - ((navKeys.ArrowDown || navKeys.s || navKeys.S) ? 1 : 0);
+    const ks = ((navKeys.ArrowRight || navKeys.d || navKeys.D) ? 1 : 0) - ((navKeys.ArrowLeft || navKeys.a || navKeys.A) ? 1 : 0);
+    if (!kf && !ks) return;
+    const dist = camera.position.distanceTo(controls.target);
+    const step = 34 * clamp(dist / 40, 0.6, 3.2) * dt;
+    const fwd = camera.getWorldDirection(new THREE.Vector3()); fwd.y = 0; fwd.normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+    const next = controls.target.clone()
+      .addScaledVector(fwd, kf * step)
+      .addScaledVector(right, ks * step);
+    next.x = clamp(next.x, -320, 320);
+    next.z = clamp(next.z, -360, 260);
+    const delta = next.clone().sub(controls.target);
+    controls.target.copy(next);
+    camera.position.add(delta);
+  }
+  canvas.addEventListener('dblclick', () => {
+    setAutoOrbit(false);
+    startFly(OPENING.position, OPENING.target, 1.2);
+    syncViewButtons('opening');
+  });
+
+  /* ---------------------------------------------------------------------
+     God view — same single floating button as the rest of the gallery.
+     Flies the camera high above the salt flat, and back to where it was.
+     --------------------------------------------------------------------- */
+  (function initGodView() {
+    const btn = document.createElement('button');
+    btn.id = 'god-view';
+    btn.type = 'button';
+    btn.textContent = '上帝视角';
+    btn.setAttribute('aria-label', 'Toggle god view');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.style.cssText = [
+      'position:fixed', 'right:26px', 'top:84px', 'z-index:90',
+      'padding:10px 16px', 'font-size:12px', 'letter-spacing:.22em',
+      'background:rgba(10,22,30,.3)', 'color:#eaf2f6',
+      'border:1px solid rgba(255,255,255,.16)', 'border-radius:999px',
+      '-webkit-backdrop-filter:blur(14px) saturate(140%) brightness(.7)',
+      'backdrop-filter:blur(14px) saturate(140%) brightness(.7)',
+      'text-shadow:0 1px 3px rgba(0,12,18,.45)',
+      'cursor:pointer', 'font-family:inherit',
+      'transition:background .25s, border-color .25s'
+    ].join(';');
+    document.body.appendChild(btn);
+
+    const GOD_POSITION = new THREE.Vector3(0, 260, 300);
+    const GOD_TARGET = new THREE.Vector3(0, 0, -180);
+    let home = null;
+    let on = false;
+
+    // 精确返回：等飞行 tween 真正跑完再落位，并顺手清掉 OrbitControls 的
+    // 阻尼残余。用定时器硬吸附会把"返回途中用户拖拽"直接吞掉，也会留下偏移。
+    function restoreHome(H) {
+      if (on) return;
+      camera.position.copy(H.position);
+      controls.target.copy(H.target);
+      camera.fov = H.fov;
+      camera.updateProjectionMatrix();
+      camera.lookAt(controls.target);
+      controls.maxDistance = H.maxDistance;
+      // enableDamping=false 跑一帧，OrbitControls 会把 sphericalDelta / panOffset 归零
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = damping;
+      app.autoOrbit = false;
+      setAutoOrbit(false);
+    }
+
+    btn.addEventListener('click', () => {
+      on = !on;
+      btn.textContent = on ? '返回原位' : '上帝视角';
+      btn.setAttribute('aria-pressed', String(on));
+      setAutoOrbit(false);
+      if (on) {
+        home = { position: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, maxDistance: controls.maxDistance };
+        controls.maxDistance = 620;
+        startFly(GOD_POSITION, GOD_TARGET, 1.55);
+        syncViewButtons('');
+      } else if (home) {
+        const H = home;
+        home = null;
+        startFly(H.position, H.target, 1.35, () => restoreHome(H));
+      }
+    });
+  })();
+
+  setAutoOrbit(app.autoOrbit);
+  syncPresetButtons();
+
+  /* =========================================================================
+     11. SPARSE SHOOTING STAR (night only, never rebuilt)
+     ========================================================================= */
+
+  const shootPositions = new Float32Array(6);
+  const shootGeometry = new THREE.BufferGeometry();
+  shootGeometry.setAttribute('position', new THREE.BufferAttribute(shootPositions, 3));
+  const shootMaterial = new THREE.LineBasicMaterial({
+    color: 0xd9e8ff,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+  const shootingStar = new THREE.Line(shootGeometry, shootMaterial);
+  shootingStar.frustumCulled = false;
+  shootingStar.renderOrder = 20;
+  shootingStar.visible = false;
+  scene.add(shootingStar);
+
+  const shootState = {
+    active: false,
+    timer: 17 + Math.random() * 16,
+    progress: 0,
+    duration: 1.35,
+    start: new THREE.Vector3(),
+    end: new THREE.Vector3()
+  };
+
+  function spawnShootingStar() {
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+    const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+    const dir = forward.clone()
+      .addScaledVector(right, (Math.random() - 0.5) * 0.9)
+      .addScaledVector(up, 0.18 + Math.random() * 0.55)
+      .normalize();
+    if (dir.y < 0.13) dir.y = 0.13;
+    dir.normalize();
+
+    const tangent = new THREE.Vector3().crossVectors(dir, up).normalize();
+    const dir2 = dir.clone().addScaledVector(tangent, 0.026 + Math.random() * 0.035).normalize();
+    shootState.start.copy(camera.position).addScaledVector(dir, 14000);
+    shootState.end.copy(camera.position).addScaledVector(dir2, 14000);
+    shootState.active = true;
+    shootState.progress = 0;
+    shootState.duration = 1.0 + Math.random() * 0.7;
+    shootingStar.visible = true;
+  }
+
+  function updateShootingStar(dt) {
+    const canShow = app.time === 'night'
+      && app.weather !== 'overcast'
+      && app.live.numbers.starVisibility > 0.25;
+    if (!canShow) {
+      shootState.active = false;
+      shootingStar.visible = false;
+      shootMaterial.opacity = 0;
+      return;
+    }
+
+    if (!shootState.active) {
+      shootState.timer -= dt;
+      if (shootState.timer <= 0) spawnShootingStar();
+      return;
+    }
+
+    shootState.progress += dt / shootState.duration;
+    const p = shootState.progress;
+    if (p >= 1) {
+      shootState.active = false;
+      shootingStar.visible = false;
+      shootState.timer = 26 + Math.random() * 28;
+      return;
+    }
+
+    const head = shootState.start.clone().lerp(shootState.end, p);
+    const tailP = Math.max(0, p - 0.22);
+    const tail = shootState.start.clone().lerp(shootState.end, tailP);
+    shootPositions[0] = tail.x; shootPositions[1] = tail.y; shootPositions[2] = tail.z;
+    shootPositions[3] = head.x; shootPositions[4] = head.y; shootPositions[5] = head.z;
+    shootGeometry.attributes.position.needsUpdate = true;
+    shootMaterial.opacity = Math.sin(Math.PI * p) * 0.55;
+  }
+
+  /* =========================================================================
+     12. RESIZE / ADAPTIVE QUALITY
+     ========================================================================= */
+
+  let activePixelRatio = MAX_DPR;
+  let qualityReduced = false;
+  let perfTime = 0;
+  let perfFrames = 0;
+
+  function onResize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(activePixelRatio);
+    renderer.setSize(w, h, false);
+    resizeReflectionTarget();
+  }
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', () => setTimeout(onResize, 140));
+
+  function monitorQuality(dt) {
+    if (qualityReduced || !app.ready) return;
+    perfTime += dt;
+    perfFrames++;
+    if (perfTime < 4.5) return;
+    const avg = perfTime / Math.max(1, perfFrames);
+    if (avg > 0.025 && activePixelRatio > 1.05) {
+      activePixelRatio = Math.max(1, activePixelRatio * 0.78);
+      reflectionScale = Math.max(0.3, reflectionScale * 0.82);
+      qualityReduced = true;
+      onResize();
+    }
+    perfTime = 0;
+    perfFrames = 0;
+  }
+
+  /* =========================================================================
+     13. ANIMATION LOOP
+     ========================================================================= */
+
+  const clock = new THREE.Clock();
+  let elapsed = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const dt = Math.min(clock.getDelta(), 0.05);
+    elapsed += dt;
+
+    // Smooth, time-based preset cross-fades. Geometry never changes.
+    dampPreset(app.live, app.target, dt, 1.38);
+
+    applyArrowPan(dt);
+    controls.update();
+
+    if (resetTween) {
+      resetTween.t += dt;
+      const k = clamp(resetTween.t / resetTween.duration, 0, 1);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      camera.position.lerpVectors(resetTween.fromPos, resetTween.toPos, e);
+      controls.target.lerpVectors(resetTween.fromTarget, resetTween.toTarget, e);
+      camera.lookAt(controls.target);
+      if (k >= 1) {
+        const done = resetTween.onDone;
+        resetTween = null;
+        // 飞行结束后不再恢复环绕：startFly 已经把它关掉，
+        // 标准明确要求自动环绕"不得被动画自动恢复"。
+        if (done) done();
+      }
+    }
+
+    applyLiveState(elapsed);
+    updateRain(dt);
+    updateLightning(dt);
+    if (lightning > 0.001) {
+      const flash = lightning * lightning;
+      renderer.toneMappingExposure = app.live.numbers.exposure * (1 + flash * 0.85);
+      ambientLight.intensity += flash * 0.9;
+    }
+    updateShootingStar(dt);
+    updateRipples(dt);
+    updateSpray(dt);
+    updateMist(elapsed);
+
+    camera.updateMatrixWorld(true);
+    renderPlanarReflection();
+    skyMaterial.uniforms.uInvProjection.value.copy(camera.projectionMatrixInverse);
+    skyMaterial.uniforms.uCameraWorld.value.copy(camera.matrixWorld);
+    renderer.render(scene, camera);
+
+    if (!app.ready) {
+      app.ready = true;
+      window.__uyuniReady = true;
+      setTimeout(() => loadingEl.classList.add('is-hidden'), 260);
+    }
+
+    monitorQuality(dt);
+  }
+
+  animate();
+
+  // Useful for visual debugging without changing the public UI.
+  window.__uyuniDebug = { app, scene, camera, controls, renderer, skyMaterial, surfaceMaterial, mountainMaterials, reflectionTarget };
+  </script>
+
+<script>
+/* BW_V1_SALAR_LAYER — bilingual HUD, rain overlay, test hooks */
+(function () {
+  var L = {
+    zh: {
+      eyebrow: '玻利维亚 · 阿尔蒂普拉诺高原', title: '乌尤尼盐沼・天空之镜',
+      subTitle: 'SALAR DE UYUNI', subEm: '海拔 3,656 米 · 一万平方公里的镜面',
+      hintArr: ['拖动环绕', '滚轮缩放', '方向键平移', '双击复位'],
+      groups: ['视角','光','天'], views: ['全景','岛前','贴水','远眺'],
+      times: ['日间','黄昏','夜晚'], weather: ['晴朗','疏云','阴天','小雨','暴雨'],
+      orbit: '自动环绕', panelTitle: '天空之镜',
+      credit: '由 DeepSeek V4.1 Flash 生成', creditLic: '孙小画 · CC BY-NC 4.0',
+      load1: '天空之镜', load2: '正在抵达镜面',
+      errTitle: '正在等待天空', errMsg: '本场景需要支持 WebGL 2 的浏览器，并需要联网加载 Three.js。',
+      errServer: '若以本地文件方式打开，请先用静态服务器启动此目录：',
+      coordA: '南纬 20° 08′', coordB: '西经 67° 29′',
+      god: '上帝视角', godBack: '返回原位', lang: 'EN',
+      aria: '乌尤尼盐沼的交互式 3D 景观，可切换时刻与天气', doc: '乌尤尼盐沼・天空之镜',
+      aPanel: '场景预设', aViews: '机位预设', aTime: '时刻', aWeather: '天气',
+      aOrbit: '切换自动环绕', tOrbit: '自动环绕',
+      aGod: '切换上帝视角', aLang: '切换界面语言'
+    },
+    en: {
+      eyebrow: 'BOLIVIA · ALTIPLANO', title: 'Salar de Uyuni · Sky Mirror',
+      subTitle: 'SALAR DE UYUNI', subEm: '3,656 m above sea · a mirror across 10,000 km²',
+      hintArr: ['Drag to orbit', 'Scroll/pinch', 'Arrow keys', 'Double-click to reset'],
+      groups: ['View','Light','Weather'], views: ['Overview','Island','Waterline','Vista'],
+      times: ['Day','Sunset','Night'], weather: ['Clear','Drift','Overcast','Drizzle','Storm'],
+      orbit: 'Auto orbit', panelTitle: 'Sky Mirror',
+      credit: 'generated with DeepSeek V4.1 Flash', creditLic: '孙小画 · CC BY-NC 4.0',
+      load1: 'Sky Mirror', load2: 'Approaching the mirror',
+      errTitle: 'Waiting for the sky', errMsg: 'This scene needs a WebGL 2 browser and an internet connection to load Three.js.',
+      errServer: 'If you opened this as a local file, serve the folder first:',
+      coordA: '20° 08′ S', coordB: '67° 29′ W',
+      god: 'God view', godBack: 'Return', lang: '中文',
+      aria: 'Interactive 3D landscape of Salar de Uyuni with time and weather presets', doc: 'Salar de Uyuni · Sky Mirror',
+      aPanel: 'Scene presets', aViews: 'Camera presets', aTime: 'Time of day', aWeather: 'Weather',
+      aOrbit: 'Toggle auto orbit', tOrbit: 'Auto orbit',
+      aGod: 'Toggle god view', aLang: 'Switch language'
+    }
+  };
+  // 语言优先级：?lang=（站点注入，首帧即正确）> 浏览器语言
+  function langFromQuery() {
+    try {
+      var q = new URLSearchParams(location.search).get('lang');
+      if (q === 'zh' || q === 'en') return q;
+    } catch (e) { /* 老浏览器没有 URLSearchParams */ }
+    return null;
+  }
+  var langKey = langFromQuery() || (/^zh/i.test(navigator.language || '') ? 'zh' : 'en');
+  function setText(sel, txt) { var e = document.querySelector(sel); if (e) e.textContent = txt; }
+  function setAttr(sel, name, val) { var e = document.querySelector(sel); if (e) e.setAttribute(name, val); }
+  function setAll(sel, arr) { var es = document.querySelectorAll(sel); for (var i = 0; i < es.length && i < arr.length; i++) es[i].textContent = arr[i]; }
+  // 顶部状态胶囊：跟着当前时段/天气走，语言切换时也要重算
+  function syncStatus() {
+    var d = D();
+    if (!d) return;
+    document.body.dataset.time = d.app.time;
+    var t = L[langKey];
+    var ti = ['day', 'sunset', 'night'].indexOf(d.app.time);
+    var wi = ['clear', 'scattered', 'overcast', 'lightrain', 'storm'].indexOf(d.app.weather);
+    setText('#status-time', t.times[ti] || t.times[0]);
+    setText('#status-weather', t.weather[wi] || t.weather[0]);
+  }
+  function applyLanguage(k) {
+    if (!L[k]) return;
+    langKey = k;
+    var t = L[k];
+    document.documentElement.lang = k === 'zh' ? 'zh-CN' : 'en';
+    document.title = t.doc;
+    setText('.identity .eyebrow', t.eyebrow);
+    setText('.identity h1', t.title);
+    setText('#sub-title', t.subTitle);
+    setText('#sub-em', t.subEm);
+    setAll('#hint .h', t.hintArr);
+    setAll('.group-head .zh', t.groups);
+    setText('#orbit-toggle .zh', t.orbit);
+    setText('#panel-title', t.panelTitle);
+    setText('#credit-model', t.credit);
+    setText('#credit-lic', t.creditLic);
+    setText('#loading .line1', t.load1);
+    setText('#loading .line2', t.load2);
+    setText('#error h2', t.errTitle);
+    setText('#error-message', t.errMsg);
+    setText('#error-server', t.errServer);
+    setText('#coord-a', t.coordA);
+    setText('#coord-b', t.coordB);
+    setAttr('.panel', 'aria-label', t.aPanel);
+    setAttr('#view-options', 'aria-label', t.aViews);
+    setAttr('#time-options', 'aria-label', t.aTime);
+    setAttr('#weather-options', 'aria-label', t.aWeather);
+    setAttr('#orbit-toggle', 'aria-label', t.aOrbit);
+    setAttr('#orbit-toggle', 'title', t.tOrbit);
+    var gb = document.getElementById('god-view');
+    if (gb) {
+      gb.textContent = gb.getAttribute('aria-pressed') === 'true' ? t.godBack : t.god;
+      gb.setAttribute('aria-label', t.aGod);
+      gb.setAttribute('title', t.aGod);
+    }
+    var scene = document.getElementById('scene');
+    if (scene) scene.setAttribute('aria-label', t.aria);
+    if (langBtn) {
+      langBtn.textContent = t.lang;
+      langBtn.setAttribute('aria-label', t.aLang);
+    }
+    syncStatus();
+  }
+  var langBtn = document.createElement('button');
+  langBtn.id = 'bw-lang';
+  langBtn.type = 'button';
+  langBtn.style.cssText = 'position:fixed;right:26px;top:128px;z-index:90;padding:8px 14px;font-size:11px;letter-spacing:.18em;background:rgba(10,22,30,.26);color:#eaf2f6;border:1px solid rgba(255,255,255,.14);border-radius:999px;cursor:pointer;font-family:inherit;-webkit-backdrop-filter:blur(14px) saturate(140%) brightness(.7);backdrop-filter:blur(14px) saturate(140%) brightness(.7);text-shadow:0 1px 3px rgba(0,12,18,.45)';
+  // 作品跑在 sandbox 里，拿不到浏览器持久化存储；用 URL 记住手动选择，刷新后仍是同一语言。
+  function persistLang(k) {
+    try {
+      var u = new URL(location.href);
+      u.searchParams.set('lang', k);
+      history.replaceState(null, '', u.href);
+    } catch (e) { /* opaque origin 下可能被拒，忽略 */ }
+  }
+  langBtn.addEventListener('click', function () {
+    var next = langKey === 'zh' ? 'en' : 'zh';
+    applyLanguage(next);
+    persistLang(next);
+  });
+  document.body.appendChild(langBtn);
+  var mq = window.matchMedia('(max-width:960px)');
+  function syncLangPos() {
+    var short = mq.matches && innerHeight <= 640;
+    if (mq.matches) { langBtn.style.padding = '6px 9px'; langBtn.style.fontSize = '10px'; }
+    if (short) {
+      langBtn.style.left = '14px'; langBtn.style.right = 'auto'; langBtn.style.top = '14px';
+    } else if (mq.matches) {
+      langBtn.style.left = 'auto'; langBtn.style.right = '14px'; langBtn.style.top = '168px';
+    } else {
+      langBtn.style.left = 'auto'; langBtn.style.right = '26px'; langBtn.style.top = '128px';
+    }
+    var gb = document.getElementById('god-view');
+    if (gb) gb.style.top = mq.matches ? '120px' : '84px';
+  }
+  syncLangPos();
+  if (mq.addEventListener) mq.addEventListener('change', syncLangPos);
+  addEventListener('resize', syncLangPos);
+
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    if (!el || !el.closest) return;
+    if (el.closest('#time-options') || el.closest('#weather-options')) setTimeout(syncStatus, 0);
+  });
+
+  addEventListener('message', function (e) {
+    if (e.source !== window.parent || !e.data || e.data.type !== 'bw-lang') return;
+    applyLanguage(e.data.lang);
+  });
+
+  /* CSS rain overlay */
+  var cv = document.createElement('canvas'); cv.id = 'bw-rain'; cv.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:4;opacity:0;transition:opacity .6s ease';
+  document.body.appendChild(cv);
+  var ctx = cv.getContext('2d');
+  function sizeRain() { cv.width = innerWidth; cv.height = innerHeight; }
+  sizeRain(); addEventListener('resize', sizeRain);
+  var DROPS = matchMedia('(pointer:coarse)').matches ? 80 : 170;
+  var drops = [];
+  function resetDrop(d, init) { d.x = Math.random() * innerWidth; d.y = init ? Math.random() * innerHeight : -Math.random() * innerHeight * .4; d.len = 9 + Math.random() * 22; d.spd = 520 + Math.random() * 520; d.drift = 40 + Math.random() * 60; }
+  for (var i = 0; i < DROPS; i++) { var d = {}; resetDrop(d, true); drops.push(d); }
+  var last = performance.now();
+  function rainLoop(now) {
+    requestAnimationFrame(rainLoop);
+    var app = window.__uyuniDebug && window.__uyuniDebug.app;
+    var wx = app && app.weather;
+    var amt = wx === 'storm' ? .7 : (wx === 'lightrain' ? .34 : 0);
+    if (!amt) { if (cv.style.opacity !== '0') cv.style.opacity = '0'; return; }
+    var dt = Math.min(.05, Math.max(.001, (now - last) / 1000)); last = now;
+    cv.style.opacity = String(amt * (app && app.time === 'night' ? .62 : 1));
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.strokeStyle = 'rgba(220,238,246,.6)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (var j = 0; j < drops.length; j++) {
+      var q = drops[j]; q.y += q.spd * dt; q.x += q.drift * dt;
+      if (q.y > innerHeight + q.len || q.x > innerWidth + 40) resetDrop(q, false);
+      ctx.moveTo(q.x, q.y); ctx.lineTo(q.x - q.drift * .02, q.y + q.len);
+    }
+    ctx.stroke();
+  }
+  requestAnimationFrame(rainLoop);
+
+  var godBtn = function () { return document.getElementById('god-view'); };
+  function D() { return window.__uyuniDebug || null; }
+  window.__bw = {
+    get god() { var b = godBtn(); return !!(b && b.getAttribute('aria-pressed') === 'true'); },
+    get orbit() { var d = D(); return !!(d && d.app.autoOrbit); },
+    get time() { var d = D(); return d ? d.app.time : 'day'; },
+    get weather() { var d = D(); return d ? d.app.weather : 'clear'; },
+    cam: function () { var d = D(); return d ? d.camera.position.toArray().map(function (v) { return +v.toFixed(3); }) : [0,0,0]; },
+    tgt: function () { var d = D(); return d ? d.controls.target.toArray().map(function (v) { return +v.toFixed(3); }) : [0,0,0]; },
+    fov: function () { var d = D(); return d ? +d.camera.fov.toFixed(2) : 0; },
+    presets: function () {
+      // 直接从 UI 读，避免钩子和真实预设表各写一份、日后漂移
+      var t = [], w = [];
+      document.querySelectorAll('#time-options [data-time]').forEach(function (b) { t.push(b.dataset.time); });
+      document.querySelectorAll('#weather-options [data-weather]').forEach(function (b) { w.push(b.dataset.weather); });
+      return { time: t, weather: w };
+    },
+    setTime: function (k) { var b = document.querySelector('#time-options [data-time="' + k + '"]'); if (b) b.click(); },
+    setWeather: function (k) { var b = document.querySelector('#weather-options [data-weather="' + k + '"]'); if (b) b.click(); },
+    toggleGod: function () { var b = godBtn(); if (b) b.click(); },
+    setAutoOrbit: function (on) { var d = D(); var b = document.getElementById('orbit-toggle'); if (d && b && !!d.app.autoOrbit !== !!on) b.click(); },
+    setLanguage: applyLanguage,
+    settle: function (ms) {
+      return new Promise(function (res) {
+        var t0 = performance.now();
+        (function wait() {
+          if (window.__uyuniReady || performance.now() - t0 > 20000) setTimeout(res, ms);
+          else setTimeout(wait, 100);
+        })();
+      });
+    }
+  };
+
+  // 首帧就按正确语言渲染（?lang= 已定），之后只等上帝视角按钮出现再补一次文案。
+  applyLanguage(langKey);
+  var ticks = 0;
+  var timer = setInterval(function () {
+    ticks++;
+    var b = godBtn();
+    if (b) {
+      b.style.top = mq.matches ? '120px' : '84px';
+      applyLanguage(langKey);
+      clearInterval(timer);
+    } else if (ticks > 40) {
+      clearInterval(timer);
+    }
+  }, 250);
+})();
+</script>
+
+<!-- Promo bridge: the landing page drives arrow keys through postMessage and hides the in-scene language button. -->
+<script>
+(function () {
+  var embed = false;
+  try { embed = new URLSearchParams(location.search).get('embed') === '1'; } catch (e) { /* older browser */ }
+  if (embed) {
+    var ticks = 0;
+    var timer = setInterval(function () {
+      var b = document.getElementById('bw-lang');
+      if (b) { b.style.display = 'none'; clearInterval(timer); }
+      else if (++ticks > 20) clearInterval(timer);
+    }, 200);
+  }
+  var KEYS = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' };
+  addEventListener('message', function (e) {
+    if (e.source !== window.parent || !e.data || e.data.type !== 'bw-move') return;
+    var key = KEYS[e.data.dir];
+    if (!key) return;
+    dispatchEvent(new KeyboardEvent(e.data.down ? 'keydown' : 'keyup', { key: key, code: key, bubbles: true }));
+  });
+})();
+</script>
+
+</body>
+</html>
