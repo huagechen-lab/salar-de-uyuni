@@ -768,7 +768,7 @@
       skyZenith: '#083d68', skyMid: '#2270a8', skyHorizon: '#a2cddf',
       hazeColor: '#bcd9e6', hazeSunColor: '#eef0e6',
       sunColor: '#fff5e3', sunGlowColor: '#ffe4bd', moonColor: '#dce9ff',
-      cloudLit: '#fffdf8', cloudShadow: '#8fa6b8', cloudWarm: '#ffe9cd',
+      cloudLit: '#fffdf8', cloudShadow: '#7e95a9', cloudWarm: '#ffe9cd',
       sunLightColor: '#fff4e4', moonLightColor: '#9fbcf4',
       hemiSky: '#b8d9eb', hemiGround: '#f0e8d9', ambientColor: '#adc9d8',
       fogColor: '#c3dfe9', mountainLow: '#374b5c', mountainHigh: '#5d7486',
@@ -780,7 +780,7 @@
       sunLightIntensity: 2.45, moonLightIntensity: 0,
       hemiIntensity: 1.1, ambientIntensity: 0.1,
       exposure: 0.92, fogDensity: 0.000036,
-      cloudCover: 0.40, cloudOpacity: 0.84, cirrusOpacity: 0.22, overcastness: 0,
+      cloudCover: 0.40, cloudOpacity: 0.88, cirrusOpacity: 0.22, overcastness: 0,
       reflectionStrength: 1.22, reflectionBlur: 0.0003,
       glintStrength: 0.92, hazeAmount: 0.13, chop: 1,
       starVisibility: 0, milkyVisibility: 0, mountainHaze: 0.13
@@ -801,7 +801,7 @@
       sunLightIntensity: 1.5, moonLightIntensity: 0,
       hemiIntensity: 0.78, ambientIntensity: 0.08,
       exposure: 1.0, fogDensity: 0.00006,
-      cloudCover: 0.4, cloudOpacity: 0.72, cirrusOpacity: 0.20, overcastness: 0,
+      cloudCover: 0.5, cloudOpacity: 0.82, cirrusOpacity: 0.20, overcastness: 0,
       reflectionStrength: 1.08, reflectionBlur: 0.00045,
       glintStrength: 0.72, hazeAmount: 0.92, chop: 1,
       starVisibility: 0, milkyVisibility: 0, mountainHaze: 0.46
@@ -831,31 +831,31 @@
 
   const WEATHER_PRESETS = {
     clear: {
-      cloudCover: 0.28, cloudOpacity: 0.82, cirrusOpacity: 0.14, overcastness: 0,
+      cloudCover: 0.36, cloudOpacity: 0.86, cirrusOpacity: 0.14, overcastness: 0,
       sunFactor: 1, moonFactor: 1, ambientFactor: 1,
       reflection: 1, reflectionBlur: 0.0002, fog: 0.86,
       glint: 1.15, star: 1, milky: 1, exposure: 1, chop: 1
     },
     scattered: {
-      cloudCover: 0.55, cloudOpacity: 0.95, cirrusOpacity: 0.34, overcastness: 0.1,
+      cloudCover: 0.44, cloudOpacity: 0.88, cirrusOpacity: 0.34, overcastness: 0.1,
       sunFactor: 0.9, moonFactor: 0.86, ambientFactor: 1.04,
       reflection: 0.94, reflectionBlur: 0.0007, fog: 1.04,
       glint: 0.85, star: 0.5, milky: 0.45, exposure: 1, chop: 1.18
     },
     overcast: {
-      cloudCover: 0.97, cloudOpacity: 0.96, cirrusOpacity: 0.05, overcastness: 1,
+      cloudCover: 0.97, cloudOpacity: 0.96, cirrusOpacity: 0.05, overcastness: 1, cloudDarken: 0.45,
       sunFactor: 0.2, moonFactor: 0.42, ambientFactor: 1.38,
       reflection: 0.72, reflectionBlur: 0.0015, fog: 1.4,
       glint: 0.12, star: 0.012, milky: 0.015, exposure: 1.01, chop: 1.7
     },
     lightrain: {
-      cloudCover: 0.99, cloudOpacity: 0.98, cirrusOpacity: 0.04, overcastness: 1,
+      cloudCover: 0.99, cloudOpacity: 0.98, cirrusOpacity: 0.04, overcastness: 1, cloudDarken: 0.72,
       sunFactor: 0.12, moonFactor: 0.28, ambientFactor: 1.45,
       reflection: 0.58, reflectionBlur: 0.002, fog: 1.75,
       glint: 0.06, star: 0.005, milky: 0.005, exposure: 0.97, chop: 2.6
     },
     storm: {
-      cloudCover: 1.0, cloudOpacity: 1.0, cirrusOpacity: 0.02, overcastness: 1,
+      cloudCover: 1.0, cloudOpacity: 1.0, cirrusOpacity: 0.02, overcastness: 1, cloudDarken: 0.85,
       sunFactor: 0.05, moonFactor: 0.12, ambientFactor: 1.62,
       reflection: 0.38, reflectionBlur: 0.0025, fog: 2.15,
       glint: 0.02, star: 0, milky: 0, exposure: 0.9, chop: 4.8
@@ -945,6 +945,7 @@
     state.numbers.cloudOpacity = Math.min(1, cloudOpacity);
     state.numbers.cirrusOpacity = Math.min(0.8, t.cirrusOpacity * (w.cirrusOpacity / 0.22));
     state.numbers.overcastness = w.overcastness;
+    state.numbers.cloudDarken = w.cloudDarken || 0;
     state.numbers.sunDiskIntensity *= w.sunFactor;
     state.numbers.sunGlowIntensity *= lerp(0.55, 1, w.sunFactor);
     state.numbers.moonDiskIntensity *= w.moonFactor;
@@ -1451,6 +1452,7 @@
     uniform float uMoonGlowIntensity;
     uniform float uCloudCover;
     uniform float uCloudOpacity;
+    uniform float uCloudDarken;
     uniform float uCirrusOpacity;
     uniform float uOvercastness;
     uniform float uTime;
@@ -1489,8 +1491,8 @@
       float w1 = texture2D(uNoise, p * 0.12 + vec2(0.13, 0.57)).g;
       float w2 = texture2D(uNoise, p * 0.11 + vec2(0.71, 0.22)).b;
       vec2 q = p + (vec2(w1, w2) - 0.5) * 0.18;
-      float a = texture2D(uNoise, q * 0.46 + vec2(0.02, 0.09)).r;
-      float b = texture2D(uNoise, q * 0.95 + vec2(0.27, 0.61)).g;
+      float a = texture2D(uNoise, q * 0.34 + vec2(0.02, 0.09)).r;
+      float b = texture2D(uNoise, q * 0.82 + vec2(0.27, 0.61)).g;
       float c = texture2D(uNoise, q * 2.10 + vec2(0.49, 0.33)).b;
       float d = texture2D(uNoise, q * 4.00 + vec2(0.17, 0.83)).a;
       float density = a * 0.62 + b * 0.29 + c * 0.07 + d * 0.02;
@@ -1557,7 +1559,7 @@
       float coverMod = texture2D(uNoise, p * 0.23 + vec2(0.41, 0.73)).g;
       // Map the 0..1 cover dial to a density threshold. The field is centred
       // near 0.5, so small threshold moves give large, controllable changes.
-      float threshold = 0.5 + (0.5 - uCloudCover) * 0.46 + (coverMod - 0.5) * 0.05;
+      float threshold = 0.5 + (0.5 - uCloudCover) * 0.34 + (coverMod - 0.5) * 0.05;
       float softness = mix(0.09, 0.28, uOvercastness);
       float cumulus = smoothstep(threshold, threshold + softness, field);
       float edge = smoothstep(threshold, threshold + 0.06, field);
@@ -1571,7 +1573,7 @@
 
       // Dense cores are the sunlit tops; thin edges and the underside toward
       // the horizon fall into the blue-grey shadow.
-      float innerLight = clamp(0.50 + core * 0.38 + litSide * 0.26 + edge * 0.05, 0.0, 1.0);
+      float innerLight = clamp(0.40 + core * 0.46 + litSide * 0.26 + edge * 0.05, 0.0, 1.0);
 
       // In a full overcast deck the threshold is saturated, so shade from the
       // field itself: broad layers of lighter and darker cloud, not one sheet.
@@ -1590,9 +1592,14 @@
 
       // Warm/rim light from the low sun; at night a cool moonlit edge.
       float towardSun = pow(max(dot(dir, uSunDir), 0.0), 6.0);
-      cloudCol += uCloudWarm * towardSun * 0.22 * uSunGlowIntensity * (1.0 - core * 0.45);
+      cloudCol += uCloudWarm * towardSun * 0.30 * uSunGlowIntensity * (1.0 - core * 0.45);
       float towardMoon = pow(max(dot(dir, uMoonDir), 0.0), 7.0);
       cloudCol += uMoonColor * towardMoon * uMoonGlowIntensity * 0.13 * (1.0 - core * 0.5);
+
+      // Rain weather: sink the deck into a cold, dense mass and fill the
+      // gaps between cumulus so the sky reads as one heavy ceiling.
+      cloudCol = mix(cloudCol, cloudCol * vec3(0.60, 0.64, 0.70), uCloudDarken);
+      float rainDeck = uCloudDarken * smoothstep(0.06, 0.52, field) * 0.55;
 
       // High, delicate cirrus layer. More visible in clear weather.
       vec2 cirrusP = dome * vec2(0.31, 0.56) + vec2(wind * 0.0013, wind * 0.00038);
@@ -1604,6 +1611,7 @@
 
       float horizonCloudFade = smoothstep(0.006, 0.075, yUp) * 0.82 + 0.18;
       float cloudA = clamp(cumulus * uCloudOpacity * horizonCloudFade, 0.0, 0.98);
+      cloudA = 1.0 - (1.0 - cloudA) * (1.0 - clamp(rainDeck * horizonCloudFade, 0.0, 0.9));
       float cirrusA2 = clamp(cirrus * uCirrusOpacity * horizonCloudFade, 0.0, 0.72);
       float occlusion = 1.0 - (1.0 - cloudA) * (1.0 - cirrusA2);
 
@@ -1662,6 +1670,7 @@
       uMoonGlowIntensity: { value: 0 },
       uCloudCover: { value: 0.3 },
       uCloudOpacity: { value: 0.6 },
+      uCloudDarken: { value: 0 },
       uCirrusOpacity: { value: 0.4 },
       uOvercastness: { value: 0 },
       uTime: { value: 0 },
@@ -2451,6 +2460,7 @@
     su.uMoonGlowIntensity.value = n.moonGlowIntensity;
     su.uCloudCover.value = n.cloudCover;
     su.uCloudOpacity.value = n.cloudOpacity;
+    su.uCloudDarken.value = n.cloudDarken;
     su.uCirrusOpacity.value = n.cirrusOpacity;
     su.uOvercastness.value = n.overcastness;
     su.uStarVisibility.value = n.starVisibility;
